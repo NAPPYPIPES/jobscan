@@ -37,10 +37,10 @@ const SECTOR_LABEL: Record<Sector, string> = {
 };
 
 const LEVEL_ACTIVE: Record<Level, string> = {
-  BV: "bg-indigo-600 text-white ring-indigo-600",
-  HIGH: "bg-rose-600 text-white ring-rose-600",
-  MEDIUM: "bg-amber-600 text-white ring-amber-600",
-  LOW: "bg-stone-800 text-white ring-stone-800",
+  BV: "bg-indigo-600 text-white ring-indigo-600 dark:bg-indigo-500 dark:ring-indigo-500",
+  HIGH: "bg-rose-600 text-white ring-rose-600 dark:bg-rose-500 dark:ring-rose-500",
+  MEDIUM: "bg-amber-600 text-white ring-amber-600 dark:bg-amber-500 dark:ring-amber-500",
+  LOW: "bg-fg text-canvas ring-fg",
 };
 
 const SINCE_OPTIONS: { value: Since; label: string }[] = [
@@ -53,14 +53,14 @@ function Checkbox({ active }: { active: boolean }) {
   return (
     <span
       aria-hidden
-      className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] border bg-white ${
-        active ? "border-stone-700" : "border-stone-300"
+      className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] border bg-surface ${
+        active ? "border-fg" : "border-line-strong"
       }`}
     >
       {active && (
         <svg
           viewBox="0 0 12 12"
-          className="h-2.5 w-2.5 text-stone-900"
+          className="h-2.5 w-2.5 text-fg"
           fill="none"
           stroke="currentColor"
           strokeWidth={2}
@@ -114,21 +114,21 @@ export default function FilterBar({
   totalAvailable,
 }: Props) {
   return (
-    <div className="flex flex-col gap-4 border-b border-stone-200/70 pb-6">
+    <div className="flex flex-col gap-4 border-b border-line/70 pb-6">
       <div className="relative">
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => onChangeSearch(e.target.value)}
           placeholder="Search by company"
-          className="w-full rounded-lg border border-stone-200 bg-white px-3.5 py-2 pr-9 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+          className="w-full rounded-lg border border-line bg-input px-3.5 py-2 pr-9 text-sm text-fg placeholder:text-fg-faint focus:border-line-strong focus:outline-none"
           aria-label="Search by company"
         />
         {searchQuery && (
           <button
             type="button"
             onClick={() => onChangeSearch("")}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-fg-subtle transition-colors hover:bg-muted hover:text-fg"
             aria-label="Clear search"
           >
             ×
@@ -137,7 +137,7 @@ export default function FilterBar({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-stone-400">
+        <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
           Level
         </span>
         {LEVELS.map((level) => {
@@ -150,14 +150,14 @@ export default function FilterBar({
               className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium tracking-tight ring-1 ring-inset transition-all ${
                 active
                   ? LEVEL_ACTIVE[level]
-                  : "bg-white text-stone-600 ring-stone-200 hover:ring-stone-300"
+                  : "bg-surface text-fg-muted ring-line hover:ring-line-strong"
               }`}
             >
               <Checkbox active={active} />
               <span>{LEVEL_LABEL[level]}</span>
               <span
-                className={`tabular-nums ${
-                  active ? "text-white/70" : "text-stone-400"
+                className={`font-mono tabular-nums ${
+                  active ? "text-white/70" : "text-fg-subtle"
                 }`}
               >
                 {levelCounts[level]}
@@ -169,10 +169,10 @@ export default function FilterBar({
 
       {since !== undefined && onChangeSince && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-stone-400">
+          <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
             Posted within
           </span>
-          <div className="inline-flex items-center gap-1 rounded-full border border-stone-200 bg-white p-0.5">
+          <div className="inline-flex items-center gap-1 rounded-full border border-line bg-surface p-0.5">
             {SINCE_OPTIONS.map((opt) => {
               const active = since === opt.value;
               const count = sinceCounts?.[opt.value];
@@ -183,15 +183,15 @@ export default function FilterBar({
                   onClick={() => onChangeSince(opt.value)}
                   className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium tracking-tight transition-colors ${
                     active
-                      ? "bg-stone-900 text-white"
-                      : "text-stone-600 hover:text-stone-900"
+                      ? "bg-fg text-canvas"
+                      : "text-fg-muted hover:text-fg"
                   }`}
                 >
                   <span>{opt.label}</span>
                   {count !== undefined && (
                     <span
-                      className={`tabular-nums ${
-                        active ? "text-white/70" : "text-stone-400"
+                      className={`font-mono tabular-nums ${
+                        active ? "text-canvas/70" : "text-fg-subtle"
                       }`}
                     >
                       {count}
@@ -205,7 +205,7 @@ export default function FilterBar({
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-stone-400">
+        <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
           Sector
         </span>
         {SECTORS.map((sector) => {
@@ -217,15 +217,15 @@ export default function FilterBar({
               onClick={() => onToggleSector(sector)}
               className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium tracking-tight ring-1 ring-inset transition-all ${
                 active
-                  ? "bg-stone-900 text-white ring-stone-900"
-                  : "bg-white text-stone-600 ring-stone-200 hover:ring-stone-300"
+                  ? "bg-fg text-canvas ring-fg"
+                  : "bg-surface text-fg-muted ring-line hover:ring-line-strong"
               }`}
             >
               <Checkbox active={active} />
               <span>{SECTOR_LABEL[sector]}</span>
               <span
-                className={`tabular-nums ${
-                  active ? "text-white/70" : "text-stone-400"
+                className={`font-mono tabular-nums ${
+                  active ? "text-canvas/70" : "text-fg-subtle"
                 }`}
               >
                 {sectorCounts[sector]}
@@ -237,26 +237,26 @@ export default function FilterBar({
 
       {companyFilter && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-stone-400">
+          <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
             Company
           </span>
           <button
             type="button"
             onClick={onClearCompany}
-            className="inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-3 py-1 text-xs font-medium tracking-tight text-white transition-opacity hover:opacity-80"
+            className="inline-flex items-center gap-1.5 rounded-full bg-fg px-3 py-1 text-xs font-medium tracking-tight text-canvas transition-opacity hover:opacity-80"
             title="Clear company filter"
           >
             <span>{companyFilter}</span>
-            <span aria-hidden className="text-white/70">×</span>
+            <span aria-hidden className="text-canvas/70">×</span>
           </button>
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-stone-400">
+        <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
           Sort
         </span>
-        <div className="inline-flex items-center gap-1 rounded-full border border-stone-200 bg-white p-0.5">
+        <div className="inline-flex items-center gap-1 rounded-full border border-line bg-surface p-0.5">
           {SORT_OPTIONS.map((opt) => {
             const active = sort === opt.value;
             return (
@@ -267,8 +267,8 @@ export default function FilterBar({
                 title={opt.title}
                 className={`rounded-full px-3 py-1 text-xs font-medium tracking-tight transition-colors ${
                   active
-                    ? "bg-stone-900 text-white"
-                    : "text-stone-600 hover:text-stone-900"
+                    ? "bg-fg text-canvas"
+                    : "text-fg-muted hover:text-fg"
                 }`}
               >
                 {opt.label}
@@ -278,9 +278,10 @@ export default function FilterBar({
         </div>
       </div>
 
-      <p className="text-xs tabular-nums text-stone-500">
-        Showing <span className="font-semibold text-stone-900">{totalShown}</span>{" "}
-        of {totalAvailable}
+      <p className="text-xs text-fg-muted">
+        Showing{" "}
+        <span className="font-mono font-semibold tabular-nums text-fg">{totalShown}</span>{" "}
+        <span className="font-mono tabular-nums">of {totalAvailable}</span>
       </p>
     </div>
   );

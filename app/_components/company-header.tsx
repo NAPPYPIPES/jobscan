@@ -8,7 +8,7 @@ import { logoUrl } from "@/lib/scan/logos";
 // fetch 404s.
 function FallbackLogo({ displayName }: { displayName: string }) {
   return (
-    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-stone-200 text-sm font-semibold text-stone-600">
+    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-fg-muted">
       {displayName.charAt(0)}
     </div>
   );
@@ -42,7 +42,7 @@ function Chevron({ collapsed }: { collapsed: boolean }) {
       viewBox="0 0 20 20"
       fill="currentColor"
       aria-hidden="true"
-      className={`h-4 w-4 shrink-0 text-stone-400 transition-transform duration-150 ${
+      className={`h-4 w-4 shrink-0 text-fg-subtle transition-transform duration-150 ${
         collapsed ? "" : "rotate-90"
       }`}
     >
@@ -76,15 +76,15 @@ export default function CompanyHeader({
       type="button"
       onClick={onToggle}
       aria-expanded={!collapsed}
-      className="-mx-2 mb-3 flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-stone-100/70"
+      className="-mx-2 mb-3 flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted"
     >
       <CompanyLogo domain={domain} displayName={displayName} />
-      <h2 className="text-base font-semibold tracking-tight text-stone-900">
+      <h2 className="text-base font-semibold tracking-tight text-fg">
         {displayName}
       </h2>
-      <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-0.5 text-[11px] font-medium tabular-nums text-stone-600 ring-1 ring-inset ring-stone-200">
-        <span>{count}</span>
-        <span className="text-stone-400">{noun}</span>
+      <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ring-line">
+        <span className="font-mono tabular-nums text-fg-muted">{count}</span>
+        <span className="text-fg-subtle">{noun}</span>
       </span>
       <Chevron collapsed={collapsed} />
     </button>

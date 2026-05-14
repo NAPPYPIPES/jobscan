@@ -283,8 +283,8 @@ export default function MatchesView({ matches, mode, sectorBySlug }: Props) {
       />
 
       {grouped.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-stone-300 bg-white/40 p-12 text-center">
-          <p className="text-sm text-stone-500">
+        <div className="empty-state p-12 text-center">
+          <p className="text-sm text-fg-subtle">
             {mode === "recent"
               ? `No new matches in the last ${since}.`
               : "No matches with current filters."}
@@ -296,9 +296,9 @@ export default function MatchesView({ matches, mode, sectorBySlug }: Props) {
             <button
               type="button"
               onClick={onToggleAll}
-              className="inline-flex items-center gap-1.5 rounded-md border border-stone-200 bg-white px-2.5 py-1 text-xs font-medium text-stone-600 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900"
+              className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-xs font-medium text-fg-muted shadow-card transition-colors hover:border-line-strong hover:bg-muted hover:text-fg"
             >
-              <span aria-hidden className="text-base leading-none text-stone-400">
+              <span aria-hidden className="text-base leading-none text-fg-subtle">
                 {allCollapsed ? "+" : "−"}
               </span>
               <span>{allCollapsed ? "Expand all" : "Collapse all"}</span>

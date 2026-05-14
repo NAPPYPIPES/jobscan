@@ -51,27 +51,27 @@ export default function ScanFailures({
   return (
     <section>
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold tracking-tight text-stone-700">
+        <h2 className="text-sm font-semibold tracking-tight text-fg-muted">
           Scan failures
         </h2>
-        <p className="text-[11px] text-stone-400">
+        <p className="text-[11px] text-fg-subtle">
           Latest successful scan:{" "}
-          <span className="font-mono tabular-nums text-stone-500">
+          <span className="font-mono tabular-nums text-fg-muted">
             {latestSuccessIso ? formatScanTime(latestSuccessIso) : "—"}
           </span>
         </p>
       </div>
 
       {targets.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-stone-300 bg-white/40 p-6 text-center">
-          <p className="text-sm text-stone-500">
+        <div className="empty-state p-6 text-center">
+          <p className="text-sm text-fg-subtle">
             All targets scanned successfully in the most recent cycle.
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <div className="border-b border-stone-100 px-4 py-2.5 text-[11px] text-stone-500">
-            <span className="font-semibold tabular-nums text-stone-800">
+        <div className="rounded-lg border border-line bg-surface shadow-card">
+          <div className="border-b border-line-subtle px-4 py-2.5 text-[11px] text-fg-subtle">
+            <span className="font-mono font-semibold tabular-nums text-fg">
               {targets.length}
             </span>{" "}
             of all targets · their stale matches stay open until the scan
@@ -84,20 +84,20 @@ export default function ScanFailures({
                 <li
                   key={t.slug}
                   className={`flex items-center gap-3 px-4 py-2 text-sm ${
-                    i > 0 ? "border-t border-stone-100" : ""
+                    i > 0 ? "border-t border-line-subtle" : ""
                   }`}
                 >
-                  <span className="inline-flex w-20 shrink-0 justify-center rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-rose-700 ring-1 ring-inset ring-rose-200/70">
+                  <span className="inline-flex w-20 shrink-0 justify-center rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-rose-700 ring-1 ring-inset ring-rose-200/70 dark:bg-rose-950/40 dark:text-rose-300 dark:ring-rose-400/20">
                     Failing
                   </span>
-                  <span className="w-20 shrink-0 text-xs text-stone-400">
+                  <span className="w-20 shrink-0 text-xs text-fg-subtle">
                     {ATS_LABEL[t.ats]}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-stone-800">
+                  <span className="min-w-0 flex-1 truncate text-fg">
                     {t.displayName}
                   </span>
                   <span
-                    className="w-24 shrink-0 text-right text-xs tabular-nums text-stone-500"
+                    className="w-24 shrink-0 text-right font-mono text-[11px] tabular-nums text-fg-muted"
                     title={t.lastSuccessIso ?? undefined}
                   >
                     {t.lastSuccessIso ? shortAgo(t.lastSuccessIso) : "—"}
@@ -110,26 +110,26 @@ export default function ScanFailures({
           {neverScanned.length > 0 && (
             <ul
               className={
-                failing.length > 0 ? "border-t-2 border-stone-200" : ""
+                failing.length > 0 ? "border-t-2 border-line" : ""
               }
             >
               {neverScanned.map((t, i) => (
                 <li
                   key={t.slug}
                   className={`flex items-center gap-3 px-4 py-2 text-sm ${
-                    i > 0 ? "border-t border-stone-100" : ""
+                    i > 0 ? "border-t border-line-subtle" : ""
                   }`}
                 >
-                  <span className="inline-flex w-20 shrink-0 justify-center rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-stone-600 ring-1 ring-inset ring-stone-200">
+                  <span className="inline-flex w-20 shrink-0 justify-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-fg-muted ring-1 ring-inset ring-line">
                     New
                   </span>
-                  <span className="w-20 shrink-0 text-xs text-stone-400">
+                  <span className="w-20 shrink-0 text-xs text-fg-subtle">
                     {ATS_LABEL[t.ats]}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-stone-800">
+                  <span className="min-w-0 flex-1 truncate text-fg">
                     {t.displayName}
                   </span>
-                  <span className="w-24 shrink-0 text-right text-xs tabular-nums text-stone-400">
+                  <span className="w-24 shrink-0 text-right font-mono text-[11px] tabular-nums text-fg-subtle">
                     never
                   </span>
                 </li>

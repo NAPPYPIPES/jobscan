@@ -35,15 +35,15 @@ export default async function Home() {
   return (
     <main className="mx-auto max-w-4xl px-6 py-12 sm:py-16">
       <div className="mb-10 flex flex-col gap-2">
-        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">
+        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-fg-subtle">
           Recent
         </p>
-        <h1 className="text-4xl font-semibold tracking-tight text-stone-900 sm:text-5xl">
+        <h1 className="text-4xl font-semibold tracking-tight text-fg sm:text-5xl">
           New matches
         </h1>
-        <p className="max-w-xl text-[15px] leading-relaxed text-stone-500">
+        <p className="max-w-xl text-[15px] leading-relaxed text-fg-muted">
           Roles first seen in the selected window across{" "}
-          <span className="font-medium text-stone-700">target companies</span>.
+          <span className="font-medium text-fg">target companies</span>.
           Click any card to open the apply page.
         </p>
       </div>

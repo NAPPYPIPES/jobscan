@@ -12,13 +12,13 @@ export default async function ManualPage() {
   return (
     <main className="mx-auto max-w-5xl px-6 py-12 sm:py-16">
       <div className="mb-8 flex flex-col gap-2">
-        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">
+        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-fg-subtle">
           Daily checklist
         </p>
-        <h1 className="text-4xl font-semibold tracking-tight text-stone-900 sm:text-5xl">
+        <h1 className="text-4xl font-semibold tracking-tight text-fg sm:text-5xl">
           Manual checks
         </h1>
-        <p className="max-w-xl text-[15px] leading-relaxed text-stone-500">
+        <p className="max-w-xl text-[15px] leading-relaxed text-fg-muted">
           Companies with custom ATSs &mdash; visit each careers page daily to
           catch new roles. Click the button to open and mark checked in one go.
         </p>

@@ -100,9 +100,9 @@ export default function TargetsTable({ rows }: { rows: TargetRow[] }) {
   }, [rows, sortKey, sortDir]);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+    <div className="overflow-hidden rounded-lg border border-line bg-surface shadow-card">
       <table className="w-full text-sm">
-        <thead className="bg-stone-50 text-[10px] font-medium uppercase tracking-wider text-stone-500">
+        <thead className="bg-muted text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
           <tr>
             {COLUMNS.map((c) => {
               const active = c.key === sortKey;
@@ -117,8 +117,8 @@ export default function TargetsTable({ rows }: { rows: TargetRow[] }) {
                     onClick={() => onHeaderClick(c.key)}
                     className={`inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors ${
                       active
-                        ? "text-stone-900"
-                        : "text-stone-500 hover:text-stone-800"
+                        ? "text-fg"
+                        : "text-fg-subtle hover:text-fg"
                     }`}
                     title={`Sort by ${c.label}`}
                   >
@@ -142,26 +142,26 @@ export default function TargetsTable({ rows }: { rows: TargetRow[] }) {
             return (
               <tr
                 key={t.slug}
-                className="border-t border-stone-100 hover:bg-stone-50"
+                className="border-t border-line-subtle transition-colors hover:bg-muted"
               >
-                <td className="px-3 py-2 font-medium text-stone-900">
+                <td className="px-3 py-2 font-medium text-fg">
                   {t.displayName}
                 </td>
-                <td className="px-3 py-2 text-stone-600">{ATS_LABEL[t.ats] ?? t.ats}</td>
-                <td className="px-3 py-2 font-mono text-xs text-stone-500">
+                <td className="px-3 py-2 text-fg-muted">{ATS_LABEL[t.ats] ?? t.ats}</td>
+                <td className="px-3 py-2 font-mono text-xs text-fg-subtle">
                   {t.slug}
                 </td>
-                <td className="px-3 py-2 text-stone-600">{t.sector}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-stone-700">
+                <td className="px-3 py-2 text-fg-muted">{t.sector}</td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums text-fg">
                   {t.count}
                 </td>
-                <td className="px-3 py-2 text-stone-500">{shortDate(last)}</td>
+                <td className="px-3 py-2 font-mono text-xs tabular-nums text-fg-subtle">{shortDate(last)}</td>
                 <td className="px-3 py-2">
                   <span
                     className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ${
                       t.count > 0
-                        ? "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200/70"
-                        : "bg-stone-100 text-stone-500 ring-1 ring-inset ring-stone-200"
+                        ? "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200/70 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-400/20"
+                        : "bg-muted text-fg-subtle ring-1 ring-inset ring-line"
                     }`}
                   >
                     {status}

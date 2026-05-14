@@ -59,22 +59,22 @@ export default function ManualChecklist({ companies }: { companies: ManualCompan
 
   return (
     <>
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-stone-600">
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-fg-muted">
         <span>
-          <span className="font-semibold text-stone-900">
+          <span className="font-mono font-semibold tabular-nums text-fg">
             {loaded ? checkedTodayCount : "—"}
           </span>{" "}
           checked in last 24h
         </span>
-        <span className="text-stone-300">&middot;</span>
+        <span className="text-fg-faint">&middot;</span>
         <span>
-          <span className="font-semibold text-stone-900">
+          <span className="font-mono font-semibold tabular-nums text-fg">
             {loaded ? needsAttentionCount : "—"}
           </span>{" "}
           need attention
         </span>
-        <span className="text-stone-300">&middot;</span>
-        <span className="text-stone-400">Resets daily</span>
+        <span className="text-fg-faint">&middot;</span>
+        <span className="text-fg-subtle">Resets daily</span>
       </div>
 
       <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -106,23 +106,23 @@ function CompanyCard({
   const isChecked = staleness === "today";
   return (
     <div
-      className={`flex h-full flex-col rounded-xl bg-white p-5 transition-colors ${BORDER_CLASSES[staleness]}`}
+      className={`flex h-full flex-col rounded-xl bg-surface p-5 transition-colors ${BORDER_CLASSES[staleness]}`}
     >
       <div className="flex items-start justify-between gap-2">
         <h3
           className={`text-lg font-semibold tracking-tight ${
-            isChecked ? "text-stone-400" : "text-stone-900"
+            isChecked ? "text-fg-subtle" : "text-fg"
           }`}
         >
-          {isChecked && <span className="mr-1 text-emerald-600">✓</span>}
+          {isChecked && <span className="mr-1 text-emerald-600 dark:text-emerald-400">✓</span>}
           {company.name}
         </h3>
         <SectorPill sector={company.sector} />
       </div>
-      <p className="mt-1 text-xs text-stone-400">{lastCheckedLabel(lastChecked)}</p>
+      <p className="mt-1 font-mono text-[11px] tabular-nums text-fg-subtle">{lastCheckedLabel(lastChecked)}</p>
       <p
         className={`mt-3 flex-1 text-sm ${
-          isChecked ? "text-stone-400" : "text-stone-500"
+          isChecked ? "text-fg-subtle" : "text-fg-muted"
         }`}
       >
         {company.description}
@@ -134,8 +134,8 @@ function CompanyCard({
         onClick={onCheck}
         className={`mt-4 block w-full rounded-lg px-4 py-2 text-center text-sm font-medium transition-colors ${
           isChecked
-            ? "bg-stone-100 text-stone-500 hover:bg-stone-200"
-            : "bg-stone-900 text-white hover:bg-stone-800"
+            ? "bg-muted text-fg-muted hover:bg-line"
+            : "bg-fg text-canvas hover:opacity-90"
         }`}
       >
         {isChecked ? "Checked today — revisit" : "Check now →"}
@@ -144,11 +144,15 @@ function CompanyCard({
   );
 }
 
+// Sector pills now use the existing accent palette instead of
+// introducing sky / violet that appear nowhere else. Tech is the
+// neutral default; finserv keeps amber (already an accent in the
+// system); consulting picks indigo; other stays muted stone.
 const SECTOR_PILL_CLASSES: Record<ManualSector, string> = {
-  tech: "bg-sky-50 text-sky-700 ring-sky-200/70",
-  finserv: "bg-emerald-50 text-emerald-700 ring-emerald-200/70",
-  consulting: "bg-violet-50 text-violet-700 ring-violet-200/70",
-  other: "bg-stone-100 text-stone-700 ring-stone-200/70",
+  tech: "bg-muted text-fg-muted ring-line",
+  finserv: "bg-amber-50 text-amber-800 ring-amber-200/70 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-400/20",
+  consulting: "bg-indigo-50 text-indigo-700 ring-indigo-200/70 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-400/20",
+  other: "bg-muted text-fg-subtle ring-line",
 };
 
 function SectorPill({ sector }: { sector: ManualSector }) {

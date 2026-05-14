@@ -81,7 +81,7 @@ export default function TopCompaniesList({ companies }: Props) {
 
   return (
     <section>
-      <h2 className="mb-4 text-sm font-semibold tracking-tight text-stone-700">
+      <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
         Top 10 companies by open roles
       </h2>
 
@@ -94,8 +94,8 @@ export default function TopCompaniesList({ companies }: Props) {
                 key={level}
                 type="button"
                 onClick={() => toggleLevel(level)}
-                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium uppercase tracking-wider transition-opacity hover:bg-stone-100 ${
-                  active ? "text-stone-700" : "text-stone-400"
+                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium uppercase tracking-wider transition-colors hover:bg-muted ${
+                  active ? "text-fg" : "text-fg-subtle"
                 }`}
                 title={active ? `Hide ${level} segments` : `Show ${level} segments`}
               >
@@ -109,7 +109,7 @@ export default function TopCompaniesList({ companies }: Props) {
             );
           })}
         </div>
-        <div className="inline-flex items-center gap-1 rounded-full border border-stone-200 bg-white p-0.5">
+        <div className="inline-flex items-center gap-1 rounded-full border border-line bg-surface p-0.5">
           {(["total", "med+", "high+"] as const).map((opt) => {
             const active = sortBy === opt;
             return (
@@ -119,8 +119,8 @@ export default function TopCompaniesList({ companies }: Props) {
                 onClick={() => setSortBy(opt)}
                 className={`rounded-full px-3 py-1 text-xs font-medium tracking-tight transition-colors ${
                   active
-                    ? "bg-stone-900 text-white"
-                    : "text-stone-600 hover:text-stone-900"
+                    ? "bg-fg text-canvas"
+                    : "text-fg-muted hover:text-fg"
                 }`}
                 title={`Sort by ${SORT_LABEL[opt]}`}
               >
@@ -132,33 +132,33 @@ export default function TopCompaniesList({ companies }: Props) {
       </div>
 
       {sorted.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-stone-300 bg-white/40 p-6 text-center">
-          <p className="text-sm text-stone-500">
+        <div className="empty-state p-6 text-center">
+          <p className="text-sm text-fg-subtle">
             No open matches yet — wait for the next scan.
           </p>
         </div>
       ) : (
-        <ul className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+        <ul className="overflow-hidden rounded-lg border border-line bg-surface shadow-card">
           {sorted.map((entry, i) => {
             const vis = visibleSum(entry);
             return (
               <li
                 key={entry.slug}
                 className={`flex items-center gap-3 px-4 py-3 ${
-                  i > 0 ? "border-t border-stone-100" : ""
+                  i > 0 ? "border-t border-line-subtle" : ""
                 }`}
               >
-                <span className="w-5 shrink-0 text-xs tabular-nums text-stone-400">
+                <span className="w-5 shrink-0 font-mono text-xs tabular-nums text-fg-subtle">
                   {i + 1}
                 </span>
                 <Link
                   href={`/all?company=${encodeURIComponent(entry.slug)}`}
-                  className="w-40 shrink-0 truncate text-sm text-stone-900 hover:text-stone-950 hover:underline"
+                  className="w-40 shrink-0 truncate text-sm text-fg hover:underline"
                   title={`See all ${entry.name} roles`}
                 >
                   {entry.name}
                 </Link>
-                <div className="h-3.5 flex-1 overflow-hidden rounded-full bg-stone-100">
+                <div className="h-3.5 flex-1 overflow-hidden rounded-full bg-muted">
                   <div
                     className="flex h-full"
                     style={{ width: `${(vis / maxVisible) * 100}%` }}
@@ -180,7 +180,7 @@ export default function TopCompaniesList({ companies }: Props) {
                     )}
                   </div>
                 </div>
-                <span className="w-10 shrink-0 text-right text-sm font-semibold tabular-nums text-stone-700">
+                <span className="w-10 shrink-0 text-right font-mono text-sm font-semibold tabular-nums text-fg">
                   {vis}
                 </span>
               </li>

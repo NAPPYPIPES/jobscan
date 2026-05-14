@@ -292,13 +292,13 @@ export default async function Analytics() {
   return (
     <main className="mx-auto max-w-5xl px-6 py-12 sm:py-16">
       <div className="mb-10 flex flex-col gap-2">
-        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">
+        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-fg-subtle">
           Analytics
         </p>
-        <h1 className="text-4xl font-semibold tracking-tight text-stone-900 sm:text-5xl">
+        <h1 className="text-4xl font-semibold tracking-tight text-fg sm:text-5xl">
           Patterns &amp; signal
         </h1>
-        <p className="max-w-xl text-[15px] leading-relaxed text-stone-500">
+        <p className="max-w-xl text-[15px] leading-relaxed text-fg-muted">
           Aggregates across the current match set. Use these to spot
           companies worth re-prioritizing, dismissal patterns worth baking
           into the classifier, and roles that have quietly closed.
@@ -306,7 +306,7 @@ export default async function Analytics() {
       </div>
 
       <section className="mb-10">
-        <h2 className="mb-4 text-sm font-semibold tracking-tight text-stone-700">
+        <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
           Activity (last 72h)
         </h2>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -338,17 +338,17 @@ export default async function Analytics() {
       </div>
 
       <section className="mb-10">
-        <h2 className="mb-4 text-sm font-semibold tracking-tight text-stone-700">
+        <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
           API spend
         </h2>
         <DailySpendChart data={dailySpend} />
       </section>
 
       <section className="mb-10">
-        <h2 className="mb-4 text-sm font-semibold tracking-tight text-stone-700">
+        <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
           Dismissals
         </h2>
-        <p className="mb-4 text-sm text-stone-600">
+        <p className="mb-4 text-sm text-fg-muted">
           Tagged reasons when you dismiss a role from a card. Multi-select
           — one row can carry multiple tags (e.g. wrong location + wrong
           function).
@@ -356,12 +356,12 @@ export default async function Analytics() {
         <DismissalReasonBars counts={dismissByReason} noTag={noTagCount} />
 
         <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-stone-500">
+          <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
               Top 5 dismissed companies
             </h3>
             {topDismissedCompanies.length === 0 ? (
-              <p className="text-sm text-stone-400">No dismissals yet.</p>
+              <p className="text-sm text-fg-subtle">No dismissals yet.</p>
             ) : (
               <ul className="flex flex-col gap-1.5 text-sm">
                 {topDismissedCompanies.map((c) => (
@@ -369,19 +369,19 @@ export default async function Analytics() {
                     key={c.company}
                     className="flex items-baseline justify-between"
                   >
-                    <span className="text-stone-700">{c.company}</span>
-                    <span className="tabular-nums text-stone-500">{c.count}</span>
+                    <span className="text-fg-muted">{c.company}</span>
+                    <span className="font-mono tabular-nums text-fg-subtle">{c.count}</span>
                   </li>
                 ))}
               </ul>
             )}
           </div>
-          <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-stone-500">
+          <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
               Top 10 dismissed titles
             </h3>
             {topDismissedTitles.length === 0 ? (
-              <p className="text-sm text-stone-400">No dismissals yet.</p>
+              <p className="text-sm text-fg-subtle">No dismissals yet.</p>
             ) : (
               <ul className="flex flex-col gap-1.5 text-sm">
                 {topDismissedTitles.map((t, i) => (
@@ -389,10 +389,10 @@ export default async function Analytics() {
                     key={`${t.title}-${i}`}
                     className="flex items-baseline justify-between gap-3"
                   >
-                    <span className="min-w-0 truncate text-stone-700">
+                    <span className="min-w-0 truncate text-fg-muted">
                       {t.title}
                     </span>
-                    <span className="shrink-0 tabular-nums text-stone-500">
+                    <span className="shrink-0 font-mono tabular-nums text-fg-subtle">
                       {t.count}
                     </span>
                   </li>
@@ -404,12 +404,12 @@ export default async function Analytics() {
       </section>
 
       <section>
-        <h2 className="mb-4 text-sm font-semibold tracking-tight text-stone-700">
+        <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
           Recent dismissals (last 25)
         </h2>
         {recentWithUrls.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-stone-300 bg-white/40 p-6 text-center">
-            <p className="text-sm text-stone-500">
+          <div className="empty-state p-6 text-center">
+            <p className="text-sm text-fg-subtle">
               You haven&rsquo;t dismissed anything yet.
             </p>
           </div>
@@ -447,27 +447,27 @@ function DismissalReasonBars({
 
   if (total === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-stone-300 bg-white/40 p-6 text-center">
-        <p className="text-sm text-stone-500">No dismissals yet.</p>
+      <div className="empty-state p-6 text-center">
+        <p className="text-sm text-fg-subtle">No dismissals yet.</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+    <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
       <div className="flex flex-col gap-2">
         {REASONS.map((r) => {
           const count = counts[r.key] ?? 0;
           const pct = max > 0 ? (count / max) * 100 : 0;
           return (
-            <BarRow key={r.key} label={r.label} count={count} widthPct={pct} bar="bg-stone-500" />
+            <BarRow key={r.key} label={r.label} count={count} widthPct={pct} bar="bg-stone-500 dark:bg-stone-400" />
           );
         })}
         <BarRow
           label="No tag"
           count={noTag}
           widthPct={max > 0 ? (noTag / max) * 100 : 0}
-          bar="bg-stone-300"
+          bar="bg-stone-300 dark:bg-stone-600"
           muted
         />
       </div>
@@ -490,10 +490,10 @@ function BarRow({
 }) {
   return (
     <div className="grid grid-cols-[10rem_1fr_3rem] items-center gap-3">
-      <span className={`text-xs ${muted ? "text-stone-400" : "text-stone-600"}`}>
+      <span className={`text-xs ${muted ? "text-fg-subtle" : "text-fg-muted"}`}>
         {label}
       </span>
-      <div className="h-3 w-full rounded-sm bg-stone-100">
+      <div className="h-3 w-full rounded-sm bg-muted">
         {count > 0 && (
           <div
             className={`h-full rounded-sm ${bar}`}
@@ -501,7 +501,7 @@ function BarRow({
           />
         )}
       </div>
-      <span className="text-right text-xs tabular-nums text-stone-700">
+      <span className="text-right font-mono text-xs tabular-nums text-fg">
         {count}
       </span>
     </div>

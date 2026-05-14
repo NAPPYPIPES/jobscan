@@ -2,10 +2,10 @@ import type { Match } from "@/db/schema";
 import type { Level } from "@/lib/scan/types";
 
 const LEVEL_PILL: Record<Level, string> = {
-  BV: "bg-indigo-50 text-indigo-700 ring-indigo-200/70",
-  HIGH: "bg-rose-50 text-rose-700 ring-rose-200/70",
-  MEDIUM: "bg-amber-50 text-amber-800 ring-amber-200/70",
-  LOW: "bg-stone-100 text-stone-600 ring-stone-200",
+  BV: "bg-indigo-50 text-indigo-700 ring-indigo-200/70 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-400/20",
+  HIGH: "bg-rose-50 text-rose-700 ring-rose-200/70 dark:bg-rose-950/40 dark:text-rose-300 dark:ring-rose-400/20",
+  MEDIUM: "bg-amber-50 text-amber-800 ring-amber-200/70 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-400/20",
+  LOW: "bg-stone-100 text-stone-600 ring-stone-200 dark:bg-stone-800/60 dark:text-stone-300 dark:ring-stone-700",
 };
 const LEVEL_LABEL: Record<Level, string> = {
   BV: "BV",
@@ -47,32 +47,32 @@ export default function ClosedRoles({
   return (
     <section>
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold tracking-tight text-stone-700">
+        <h2 className="text-sm font-semibold tracking-tight text-fg-muted">
           Closed at the ATS
         </h2>
-        <p className="text-[11px] text-stone-400">
+        <p className="text-[11px] text-fg-subtle">
           Latest successful scan:{" "}
-          <span className="font-mono tabular-nums text-stone-500">
+          <span className="font-mono tabular-nums text-fg-muted">
             {latestScanIso ? formatScanTime(latestScanIso) : "—"}
           </span>
         </p>
       </div>
-      <p className="mb-4 text-sm text-stone-600">
+      <p className="mb-4 text-sm text-fg-muted">
         Roles the scanner confirmed are gone from the ATS — already excluded
         from /all and the digest. Listed here as an audit trail; nothing for
         you to act on.
       </p>
 
       {totalCount === 0 ? (
-        <div className="rounded-lg border border-dashed border-stone-300 bg-white/40 p-6 text-center">
-          <p className="text-sm text-stone-500">
+        <div className="empty-state p-6 text-center">
+          <p className="text-sm text-fg-subtle">
             Nothing closed yet — every active match was confirmed by a recent scan.
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <div className="border-b border-stone-100 px-4 py-2.5 text-[11px] text-stone-500">
-            <span className="font-semibold tabular-nums text-stone-800">
+        <div className="rounded-lg border border-line bg-surface shadow-card">
+          <div className="border-b border-line-subtle px-4 py-2.5 text-[11px] text-fg-subtle">
+            <span className="font-mono font-semibold tabular-nums text-fg">
               {totalCount}
             </span>{" "}
             closed · showing {rows.length} most recent
@@ -82,7 +82,7 @@ export default function ClosedRoles({
               <li
                 key={m.id}
                 className={`flex items-center gap-3 px-4 py-2 ${
-                  i > 0 ? "border-t border-stone-100" : ""
+                  i > 0 ? "border-t border-line-subtle" : ""
                 }`}
               >
                 <span
@@ -90,20 +90,20 @@ export default function ClosedRoles({
                 >
                   {LEVEL_LABEL[m.level]}
                 </span>
-                <span className="hidden w-32 shrink-0 truncate text-xs text-stone-500 sm:inline">
+                <span className="hidden w-32 shrink-0 truncate text-xs text-fg-subtle sm:inline">
                   {m.companyDisplayName}
                 </span>
                 <a
                   href={applyUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="min-w-0 flex-1 truncate text-sm text-stone-700 line-through decoration-stone-400 hover:text-stone-900 hover:decoration-stone-600"
+                  className="min-w-0 flex-1 truncate text-sm text-fg-muted line-through decoration-line-strong hover:text-fg hover:decoration-fg-subtle"
                   title="Open the old ATS link — expect a 404 / removed page"
                 >
                   {m.title}
                 </a>
                 <span
-                  className="w-20 shrink-0 text-right text-xs tabular-nums text-stone-400"
+                  className="w-20 shrink-0 text-right font-mono text-[11px] tabular-nums text-fg-subtle"
                   title={
                     m.closedAt
                       ? `Closed at: ${new Date(m.closedAt).toISOString()}`

@@ -49,21 +49,21 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
   const unitLabel = granularity === "day" ? "days" : "weeks";
 
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+    <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-stone-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
             {granularity === "day" ? "Daily spend" : "Weekly spend"}
           </h3>
-          <p className="mt-0.5 text-xs text-stone-400">
-            <span className="font-mono tabular-nums text-stone-700">
+          <p className="mt-0.5 text-xs text-fg-subtle">
+            <span className="font-mono tabular-nums text-fg">
               ${total.toFixed(2)}
             </span>{" "}
             in last {units} {unitLabel}
           </p>
         </div>
         <div className="flex gap-2">
-          <div className="flex gap-1 rounded-md border border-stone-200 bg-stone-50 p-0.5">
+          <div className="flex gap-1 rounded-md border border-line bg-muted p-0.5">
             {(["day", "week"] as Granularity[]).map((g) => (
               <button
                 key={g}
@@ -72,26 +72,26 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
                   setGranularity(g);
                   setUnits(DEFAULT_RANGE[g]);
                 }}
-                className={`rounded px-2 py-0.5 text-[11px] font-medium tabular-nums transition-colors ${
+                className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
                   granularity === g
-                    ? "bg-white text-stone-900 shadow-sm"
-                    : "text-stone-500 hover:text-stone-700"
+                    ? "bg-surface text-fg shadow-sm"
+                    : "text-fg-subtle hover:text-fg"
                 }`}
               >
                 {g === "day" ? "Day" : "Week"}
               </button>
             ))}
           </div>
-          <div className="flex gap-1 rounded-md border border-stone-200 bg-stone-50 p-0.5">
+          <div className="flex gap-1 rounded-md border border-line bg-muted p-0.5">
             {RANGES[granularity].map((r) => (
               <button
                 key={r.units}
                 type="button"
                 onClick={() => setUnits(r.units)}
-                className={`rounded px-2 py-0.5 text-[11px] font-medium tabular-nums transition-colors ${
+                className={`rounded px-2 py-0.5 font-mono text-[11px] font-medium tabular-nums transition-colors ${
                   units === r.units
-                    ? "bg-white text-stone-900 shadow-sm"
-                    : "text-stone-500 hover:text-stone-700"
+                    ? "bg-surface text-fg shadow-sm"
+                    : "text-fg-subtle hover:text-fg"
                 }`}
               >
                 {r.label}
@@ -102,7 +102,7 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
       </div>
 
       <div className="relative">
-        <div className="flex h-32 items-end gap-[1px] border-b border-l border-stone-200 pl-2 pr-1 pt-1">
+        <div className="flex h-32 items-end gap-[1px] border-b border-l border-line pl-2 pr-1 pt-1">
           {padded.map((d) => {
             const heightPct = yMax === 0 ? 0 : (d.spendUsd / yMax) * 100;
             return (
@@ -114,8 +114,8 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
                 <div
                   className={`w-full rounded-sm transition-colors ${
                     d.spendUsd > 0
-                      ? "bg-emerald-500 group-hover:bg-emerald-600"
-                      : "bg-stone-100 group-hover:bg-stone-200"
+                      ? "bg-emerald-500 group-hover:bg-emerald-600 dark:bg-emerald-400 dark:group-hover:bg-emerald-300"
+                      : "bg-muted group-hover:bg-line"
                   }`}
                   style={{ height: `${Math.max(heightPct, d.spendUsd > 0 ? 2 : 1)}%` }}
                 />
@@ -123,12 +123,12 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
             );
           })}
         </div>
-        <div className="pointer-events-none absolute right-1 top-0 text-[10px] tabular-nums text-stone-400">
+        <div className="pointer-events-none absolute right-1 top-0 font-mono text-[10px] tabular-nums text-fg-subtle">
           ${yMax.toFixed(2)}
         </div>
       </div>
 
-      <div className="mt-1 flex gap-[1px] pl-2 pr-1 text-[10px] tabular-nums text-stone-400">
+      <div className="mt-1 flex gap-[1px] pl-2 pr-1 font-mono text-[10px] tabular-nums text-fg-subtle">
         {padded.map((d, i) => (
           <div key={d.date} className="flex flex-1 justify-center">
             {i % labelEvery === 0 || i === padded.length - 1

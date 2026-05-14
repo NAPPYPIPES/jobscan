@@ -142,39 +142,39 @@ export default async function Docs() {
   return (
     <main className="mx-auto max-w-5xl px-6 py-12 sm:py-16">
       <div className="mb-10 flex flex-col gap-2">
-        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">
+        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-fg-subtle">
           Documentation
         </p>
-        <h1 className="text-4xl font-semibold tracking-tight text-stone-900 sm:text-5xl">
+        <h1 className="text-4xl font-semibold tracking-tight text-fg sm:text-5xl">
           Sources &amp; methodology
         </h1>
-        <p className="max-w-xl text-[15px] leading-relaxed text-stone-500">
+        <p className="max-w-xl text-[15px] leading-relaxed text-fg-muted">
           Reference appendix — what the scanner is doing, how scoring works,
           and where the dollars are going.
         </p>
       </div>
 
       <Section title="Target companies">
-        <p className="mb-4 text-sm text-stone-600">
-          {targets.length} target companies across {Object.keys(ATS_LABEL).length} ATS
+        <p className="mb-4 text-sm text-fg-muted">
+          <span className="font-mono tabular-nums text-fg">{targets.length}</span> target companies across {Object.keys(ATS_LABEL).length} ATS
           platforms. Hourly scan via the cron route; results live at the URLs
           built per-tenant from each ATS&rsquo;s public job-board API. These
           feed{" "}
           <a
             href="/"
-            className="font-medium text-stone-700 underline decoration-stone-300 underline-offset-2 hover:decoration-stone-600"
+            className="font-medium text-fg underline decoration-line-strong underline-offset-2 hover:decoration-fg-subtle"
           >
             Recent
           </a>
           {", "}
           <a
             href="/all"
-            className="font-medium text-stone-700 underline decoration-stone-300 underline-offset-2 hover:decoration-stone-600"
+            className="font-medium text-fg underline decoration-line-strong underline-offset-2 hover:decoration-fg-subtle"
           >
             All open
           </a>
           , and the daily digest. Edit{" "}
-          <code className="rounded bg-stone-100 px-1 py-0.5 text-[12px] text-stone-700">
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-fg">
             lib/scan/targets.ts
           </code>{" "}
           to add or remove.
@@ -195,25 +195,25 @@ export default async function Docs() {
       </Section>
 
       <Section title="Manual checklist companies">
-        <p className="mb-4 text-sm text-stone-600">
-          {manualCompanies.length} companies whose careers sites use custom
+        <p className="mb-4 text-sm text-fg-muted">
+          <span className="font-mono tabular-nums text-fg">{manualCompanies.length}</span> companies whose careers sites use custom
           ATSs that can&rsquo;t be scanned via public APIs. Not in the
           automated scan; visited daily on{" "}
           <a
             href="/manual"
-            className="font-medium text-stone-700 underline decoration-stone-300 underline-offset-2 hover:decoration-stone-600"
+            className="font-medium text-fg underline decoration-line-strong underline-offset-2 hover:decoration-fg-subtle"
           >
             /manual
           </a>
           . Edit{" "}
-          <code className="rounded bg-stone-100 px-1 py-0.5 text-[12px] text-stone-700">
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-fg">
             lib/scan/manual-targets.ts
           </code>{" "}
           to change the list or tune the pre-filtered careers URLs.
         </p>
-        <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+        <div className="overflow-hidden rounded-lg border border-line bg-surface shadow-card">
           <table className="w-full text-sm">
-            <thead className="bg-stone-50 text-[10px] font-medium uppercase tracking-wider text-stone-500">
+            <thead className="bg-muted text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
               <tr>
                 <th className="px-3 py-2 text-left">Company</th>
                 <th className="px-3 py-2 text-left">Sector</th>
@@ -224,20 +224,20 @@ export default async function Docs() {
               {manualCompanies.map((m) => (
                 <tr
                   key={m.name}
-                  className="border-t border-stone-100 hover:bg-stone-50"
+                  className="border-t border-line-subtle transition-colors hover:bg-muted"
                 >
                   <td className="px-3 py-2 font-medium">
                     <a
                       href={m.careersUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-stone-900 underline decoration-stone-300 underline-offset-2 hover:decoration-stone-600"
+                      className="text-fg underline decoration-line-strong underline-offset-2 hover:decoration-fg-subtle"
                     >
                       {m.name}
                     </a>
                   </td>
-                  <td className="px-3 py-2 text-stone-600">{m.sector}</td>
-                  <td className="px-3 py-2 text-stone-500">{m.description}</td>
+                  <td className="px-3 py-2 text-fg-muted">{m.sector}</td>
+                  <td className="px-3 py-2 text-fg-subtle">{m.description}</td>
                 </tr>
               ))}
             </tbody>
@@ -246,49 +246,49 @@ export default async function Docs() {
       </Section>
 
       <Section title="Scoring rubric">
-        <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <p className="mb-4 text-sm text-stone-600">
+        <div className="rounded-lg border border-line bg-surface p-6 shadow-card">
+          <p className="mb-4 text-sm text-fg-muted">
             Five dimensions, weighted average, rounded to one decimal. Claude
             produces the dimension scores; TypeScript computes the weighted
             average and applies the IC cap. Edit{" "}
-            <code className="rounded bg-stone-100 px-1 py-0.5 text-[12px] text-stone-700">
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-fg">
               lib/fit/rubric.ts
             </code>{" "}
             to tune.
           </p>
 
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-500">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
             Dimensions &amp; weights
           </h3>
-          <ul className="mb-4 space-y-1 text-sm text-stone-700">
+          <ul className="mb-4 space-y-1 text-sm text-fg-muted">
             {Object.entries(DEFAULT_RUBRIC.dimensions).map(([name, cfg]) => (
               <li key={name}>
                 • {name.charAt(0).toUpperCase() + name.slice(1)} match —{" "}
-                <span className="font-semibold">
+                <span className="font-mono font-semibold tabular-nums text-fg">
                   {Math.round(cfg.weight * 100)}%
                 </span>
               </li>
             ))}
           </ul>
 
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-500">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
             Caps and thresholds
           </h3>
-          <ul className="space-y-1 text-sm text-stone-700">
+          <ul className="space-y-1 text-sm text-fg-muted">
             <li>
               IC role cap:{" "}
-              <span className="font-mono">{DEFAULT_RUBRIC.icRoleCap.toFixed(1)}</span>{" "}
+              <span className="font-mono tabular-nums text-fg">{DEFAULT_RUBRIC.icRoleCap.toFixed(1)}</span>{" "}
               — individual-contributor sales roles can&rsquo;t score above
               this regardless of dimensions.
             </li>
             <li>
               Alert threshold:{" "}
-              <span className="font-mono">{DEFAULT_RUBRIC.alertThreshold.toFixed(1)}</span>{" "}
+              <span className="font-mono tabular-nums text-fg">{DEFAULT_RUBRIC.alertThreshold.toFixed(1)}</span>{" "}
               — minimum fit_score to appear in the daily digest.
             </li>
             <li>
               Hard exclusions:{" "}
-              <code className="rounded bg-stone-100 px-1 py-0.5 text-[12px] text-stone-700">
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-fg">
                 {DEFAULT_RUBRIC.hardExclusions.join(", ")}
               </code>{" "}
               — flags that force the overall score to 0.
@@ -299,41 +299,41 @@ export default async function Docs() {
 
       <Section title="API usage &amp; cost">
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-stone-400">
+          <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
               Month-to-date spend
             </div>
-            <div className="mt-1 text-3xl font-semibold tabular-nums text-stone-900">
+            <div className="mt-1 font-mono text-3xl font-semibold tabular-nums text-fg">
               ${mtdSpend.toFixed(2)}
             </div>
           </div>
-          <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-stone-400">
+          <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
               Caps
             </div>
-            <div className="mt-1 text-sm text-stone-700">
+            <div className="mt-1 text-sm text-fg-muted">
               Soft warning at{" "}
-              <span className="font-mono font-semibold text-amber-700">$35</span>{" "}
+              <span className="font-mono font-semibold tabular-nums text-amber-700 dark:text-amber-400">$35</span>{" "}
               · hard stop at{" "}
-              <span className="font-mono font-semibold text-rose-700">$40</span>
+              <span className="font-mono font-semibold tabular-nums text-rose-700 dark:text-rose-400">$40</span>
             </div>
-            <div className="mt-1 text-xs text-stone-400">
+            <div className="mt-1 text-xs text-fg-subtle">
               Edit caps in lib/fit/score.ts.
             </div>
           </div>
         </div>
 
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-500">
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
           Last 20 calls
         </h3>
         {recentCalls.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-stone-300 bg-white/40 p-6 text-center">
-            <p className="text-sm text-stone-500">No API calls yet.</p>
+          <div className="empty-state p-6 text-center">
+            <p className="text-sm text-fg-subtle">No API calls yet.</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <div className="overflow-hidden rounded-lg border border-line bg-surface shadow-card">
             <table className="w-full text-sm">
-              <thead className="bg-stone-50 text-[10px] font-medium uppercase tracking-wider text-stone-500">
+              <thead className="bg-muted text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
                 <tr>
                   <th className="px-3 py-2 text-left">When</th>
                   <th className="px-3 py-2 text-left">Purpose</th>
@@ -348,33 +348,33 @@ export default async function Docs() {
                 {recentCalls.map((c, i) => (
                   <tr
                     key={i}
-                    className="border-t border-stone-100 hover:bg-stone-50"
+                    className="border-t border-line-subtle transition-colors hover:bg-muted"
                   >
-                    <td className="px-3 py-2 text-stone-500">
+                    <td className="px-3 py-2 font-mono text-xs tabular-nums text-fg-subtle">
                       {shortDate(c.calledAt as unknown as Date)}
                     </td>
                     <td className="px-3 py-2">
                       <span
                         className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset ${
                           c.purpose === "summary"
-                            ? "bg-indigo-50 text-indigo-700 ring-indigo-200/70"
-                            : "bg-stone-100 text-stone-600 ring-stone-200"
+                            ? "bg-indigo-50 text-indigo-700 ring-indigo-200/70 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-400/20"
+                            : "bg-muted text-fg-muted ring-line"
                         }`}
                       >
                         {c.purpose}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-stone-800">{c.title ?? "—"}</td>
-                    <td className="px-3 py-2 text-stone-600">
+                    <td className="px-3 py-2 text-fg">{c.title ?? "—"}</td>
+                    <td className="px-3 py-2 text-fg-muted">
                       {c.companyDisplayName ?? "—"}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-stone-700">
+                    <td className="px-3 py-2 text-right font-mono tabular-nums text-fg">
                       {c.fitScore ?? "—"}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-stone-500">
+                    <td className="px-3 py-2 text-right font-mono tabular-nums text-fg-subtle">
                       {c.tokensIn}+{c.tokensOut}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-stone-700">
+                    <td className="px-3 py-2 text-right font-mono tabular-nums text-fg">
                       ${parseFloat(c.costUsd).toFixed(4)}
                     </td>
                   </tr>
@@ -393,15 +393,15 @@ export default async function Docs() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <Kpi label="Companies" value={targets.length} />
           <Kpi label="Total open" value={total} />
-          <Kpi label="Scored" value={scoredCount} accent="text-emerald-700" />
-          <Kpi label="BV" value={byLevel.BV} accent="text-indigo-700" />
-          <Kpi label="HIGH" value={byLevel.HIGH} accent="text-rose-700" />
-          <Kpi label="MED" value={byLevel.MEDIUM} accent="text-amber-700" />
+          <Kpi label="Scored" value={scoredCount} accent="text-emerald-700 dark:text-emerald-400" />
+          <Kpi label="BV" value={byLevel.BV} accent="text-indigo-700 dark:text-indigo-400" />
+          <Kpi label="HIGH" value={byLevel.HIGH} accent="text-rose-700 dark:text-rose-400" />
+          <Kpi label="MED" value={byLevel.MEDIUM} accent="text-amber-700 dark:text-amber-400" />
         </div>
-        <p className="mt-4 text-sm text-stone-600">
-          LOW: <span className="font-medium text-stone-900">{byLevel.LOW}</span>.{" "}
+        <p className="mt-4 text-sm text-fg-muted">
+          LOW: <span className="font-mono font-semibold tabular-nums text-fg">{byLevel.LOW}</span>.{" "}
           Last scan:{" "}
-          <span className="font-medium text-stone-900">
+          <span className="font-mono tabular-nums text-fg">
             {longDate(lastScan as unknown as Date | null)}
           </span>
           .
@@ -420,7 +420,7 @@ function Section({
 }) {
   return (
     <section className="mb-10">
-      <h2 className="mb-4 text-sm font-semibold tracking-tight text-stone-700">
+      <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
         {title}
       </h2>
       {children}
@@ -438,13 +438,13 @@ function Kpi({
   accent?: string;
 }) {
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-stone-400">
+    <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
+      <div className="text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
         {label}
       </div>
       <div
-        className={`mt-1 text-2xl font-semibold tabular-nums ${
-          accent ?? "text-stone-900"
+        className={`mt-1 font-mono text-2xl font-semibold tabular-nums ${
+          accent ?? "text-fg"
         }`}
       >
         {value}

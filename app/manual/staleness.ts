@@ -40,9 +40,9 @@ export function needsAttention(s: Staleness): boolean {
 // state can use border-dashed — Tailwind's ring utility is box-shadow
 // based and doesn't support dashed.
 export const BORDER_CLASSES: Record<Staleness, string> = {
-  today: "border-2 border-emerald-400",
-  "1-2d": "border-2 border-lime-400",
-  "2-3d": "border-2 border-amber-400",
-  "3plus": "border-2 border-orange-500",
-  never: "border-2 border-dashed border-stone-300",
+  today: "border-2 border-emerald-400 dark:border-emerald-500/70",
+  "1-2d": "border-2 border-lime-400 dark:border-lime-500/70",
+  "2-3d": "border-2 border-amber-400 dark:border-amber-500/70",
+  "3plus": "border-2 border-orange-500 dark:border-orange-400",
+  never: "border-2 border-dashed border-line-strong",
 };

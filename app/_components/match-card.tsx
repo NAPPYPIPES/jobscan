@@ -20,10 +20,10 @@ type SummaryData = {
 };
 
 const LEVEL_PILL: Record<Level, string> = {
-  BV: "bg-indigo-50 text-indigo-700 ring-indigo-200/70",
-  HIGH: "bg-rose-50 text-rose-700 ring-rose-200/70",
-  MEDIUM: "bg-amber-50 text-amber-800 ring-amber-200/70",
-  LOW: "bg-stone-100 text-stone-600 ring-stone-200",
+  BV: "bg-indigo-50 text-indigo-700 ring-indigo-200/70 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-400/20",
+  HIGH: "bg-rose-50 text-rose-700 ring-rose-200/70 dark:bg-rose-950/40 dark:text-rose-300 dark:ring-rose-400/20",
+  MEDIUM: "bg-amber-50 text-amber-800 ring-amber-200/70 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-400/20",
+  LOW: "bg-stone-100 text-stone-600 ring-stone-200 dark:bg-stone-800/60 dark:text-stone-300 dark:ring-stone-700",
 };
 
 const LEVEL_LABEL: Record<Level, string> = {
@@ -49,9 +49,9 @@ const STALE_DAYS = 30;
 const STALE_MS = STALE_DAYS * 24 * 3_600_000;
 
 function fitBadgeClass(score: number): string {
-  if (score >= 8.0) return "bg-emerald-50 text-emerald-700 ring-emerald-200/70";
-  if (score >= 6.0) return "bg-amber-50 text-amber-700 ring-amber-200/70";
-  return "bg-stone-100 text-stone-500 ring-stone-200";
+  if (score >= 8.0) return "bg-emerald-50 text-emerald-700 ring-emerald-200/70 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-400/20";
+  if (score >= 6.0) return "bg-amber-50 text-amber-700 ring-amber-200/70 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-400/20";
+  return "bg-stone-100 text-stone-500 ring-stone-200 dark:bg-stone-800/60 dark:text-stone-400 dark:ring-stone-700";
 }
 
 function ReasonCheckbox({
@@ -73,7 +73,7 @@ function ReasonCheckbox({
         onChange={() => onToggle(value)}
         className="h-3 w-3 cursor-pointer accent-rose-600"
       />
-      <span className={selected ? "text-stone-900" : "text-stone-600"}>{label}</span>
+      <span className={selected ? "text-fg" : "text-fg-muted"}>{label}</span>
     </label>
   );
 }
@@ -223,9 +223,9 @@ export default function MatchCard({
 
   if (mode === "picking") {
     return (
-      <div className="flex items-center gap-3 rounded-lg border border-stone-200 bg-white px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_1px_rgba(0,0,0,0.06)]">
-        <span className="shrink-0 text-xs font-medium text-stone-700">Wrong:</span>
-        <div className="flex flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-600">
+      <div className="flex items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 shadow-card">
+        <span className="shrink-0 text-xs font-medium text-fg">Wrong:</span>
+        <div className="flex flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
           <ReasonCheckbox value="wrong_function" selected={reasons.has("wrong_function")} onToggle={toggleReason} label="Function" />
           <ReasonCheckbox value="wrong_level"    selected={reasons.has("wrong_level")}    onToggle={toggleReason} label="Level" />
           <ReasonCheckbox value="wrong_company"  selected={reasons.has("wrong_company")}  onToggle={toggleReason} label="Company" />
@@ -244,7 +244,7 @@ export default function MatchCard({
           type="button"
           onClick={onCancelDismiss}
           disabled={pending}
-          className="shrink-0 rounded bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-200 disabled:cursor-wait"
+          className="shrink-0 rounded bg-muted px-2.5 py-1 text-xs font-medium text-fg-muted hover:text-fg disabled:cursor-wait"
         >
           Cancel
         </button>
@@ -257,9 +257,9 @@ export default function MatchCard({
 
   return (
     <div
-      className={`group rounded-lg border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_1px_rgba(0,0,0,0.06)] transition-all hover:border-stone-300 hover:shadow-[0_2px_6px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.08)] ${
+      className={`group surface-hover rounded-lg border border-line bg-surface shadow-card ${
         applied ? "opacity-60 hover:opacity-100" : ""
-      } ${!isSummaryOpen ? "hover:-translate-y-px" : ""}`}
+      }`}
     >
       <div className="flex items-center gap-3 px-4 py-3">
         <a
@@ -284,17 +284,17 @@ export default function MatchCard({
           {isStale && (
             <span
               title={`First seen >${STALE_DAYS} days ago — likely stale or hard-to-fill`}
-              className="inline-flex shrink-0 justify-center rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-red-700 ring-1 ring-inset ring-red-200/70"
+              className="inline-flex shrink-0 justify-center rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-red-700 ring-1 ring-inset ring-red-200/70 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-400/20"
             >
               Stale
             </span>
           )}
-          <h3 className="min-w-0 flex-1 truncate text-sm font-medium text-stone-900 group-hover:text-stone-950 hover:overflow-visible">
-            <span className="hover:relative hover:z-10 hover:-mx-1 hover:rounded hover:bg-white hover:px-1 hover:shadow-sm">
+          <h3 className="min-w-0 flex-1 truncate text-sm font-medium text-fg group-hover:text-fg hover:overflow-visible">
+            <span className="hover:relative hover:z-10 hover:-mx-1 hover:rounded hover:bg-surface hover:px-1 hover:shadow-sm">
               {m.title}
             </span>
           </h3>
-          <span className="hidden max-w-[180px] truncate text-xs text-stone-500 sm:block md:max-w-[280px]">
+          <span className="hidden max-w-[180px] truncate text-xs text-fg-subtle sm:block md:max-w-[280px]">
             {m.location}
           </span>
         </a>
@@ -308,7 +308,7 @@ export default function MatchCard({
               e.stopPropagation();
               onToggleSummary();
             }}
-            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-stone-500 transition-colors hover:bg-stone-50 hover:text-stone-800"
+            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-fg-subtle transition-colors hover:bg-muted hover:text-fg"
           >
             <span>AI</span>
             <svg
@@ -333,7 +333,7 @@ export default function MatchCard({
           onClick={onToggle}
           disabled={pending}
           className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors disabled:cursor-wait ${
-            applied ? "bg-emerald-500" : "bg-stone-200 hover:bg-stone-300"
+            applied ? "bg-emerald-500" : "bg-line hover:bg-line-strong"
           }`}
         >
           <span
@@ -347,7 +347,7 @@ export default function MatchCard({
           aria-label="Dismiss this role"
           onClick={onDismissClick}
           disabled={pending}
-          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-stone-300 transition-colors hover:bg-rose-50 hover:text-rose-500 disabled:cursor-wait"
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-fg-faint transition-colors hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 disabled:cursor-wait"
         >
           <svg
             className="h-2.5 w-2.5"
@@ -361,7 +361,7 @@ export default function MatchCard({
             <path d="M2 2 L8 8 M8 2 L2 8" />
           </svg>
         </button>
-        <time className="w-16 shrink-0 text-right text-xs tabular-nums text-stone-400">
+        <time className="w-16 shrink-0 text-right font-mono text-[11px] tabular-nums text-fg-subtle">
           {timeAgo(m.firstSeen)}
         </time>
       </div>
@@ -389,65 +389,65 @@ function SummarySection({
   onRegenerate: () => void;
 }) {
   return (
-    <div className="border-t border-stone-100 bg-stone-50/50 px-4 py-4">
-      <div className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+    <div className="border-t border-line-subtle bg-muted px-4 py-4">
+      <div className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">
         AI Analysis
       </div>
       {loading && !data && <SummarySkeleton />}
       {error && !loading && (
         <div className="flex items-start justify-between gap-3 text-xs">
           <div className="flex min-w-0 flex-col gap-1">
-            <span className="text-rose-600">
+            <span className="text-rose-600 dark:text-rose-400">
               Couldn&apos;t generate analysis
             </span>
-            <span className="break-words font-mono text-[10px] text-stone-400">
+            <span className="break-words font-mono text-[10px] text-fg-subtle">
               {error}
             </span>
           </div>
           <button
             type="button"
             onClick={onRegenerate}
-            className="shrink-0 rounded border border-stone-200 bg-white px-2 py-0.5 text-stone-600 hover:border-stone-300 hover:text-stone-900"
+            className="shrink-0 rounded border border-line bg-surface px-2 py-0.5 text-fg-muted hover:border-line-strong hover:text-fg"
           >
             Regenerate
           </button>
         </div>
       )}
       {data && !loading && (
-        <div className="flex flex-col gap-4 text-sm text-stone-700">
+        <div className="flex flex-col gap-4 text-sm text-fg-muted">
           <p className="leading-relaxed">{data.summary}</p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="border-l-2 border-emerald-500 pl-3">
-              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
                 Why you fit
               </div>
               <ul className="flex flex-col gap-1.5">
                 {data.pros.map((p, i) => (
-                  <li key={i} className="text-[13px] leading-snug text-stone-700">
+                  <li key={i} className="text-[13px] leading-snug text-fg-muted">
                     {p}
                   </li>
                 ))}
               </ul>
             </div>
             <div className="border-l-2 border-amber-500 pl-3">
-              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">
                 Why you might not
               </div>
               <ul className="flex flex-col gap-1.5">
                 {data.cons.map((c, i) => (
-                  <li key={i} className="text-[13px] leading-snug text-stone-700">
+                  <li key={i} className="text-[13px] leading-snug text-fg-muted">
                     {c}
                   </li>
                 ))}
               </ul>
             </div>
           </div>
-          <div className="flex items-center justify-between gap-3 text-[11px] text-stone-400">
-            <span>Generated {timeAgo(new Date(data.generated_at))}</span>
+          <div className="flex items-center justify-between gap-3 text-[11px] text-fg-subtle">
+            <span className="font-mono">Generated {timeAgo(new Date(data.generated_at))}</span>
             <button
               type="button"
               onClick={onRegenerate}
-              className="rounded border border-stone-200 bg-white px-2 py-0.5 text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-800"
+              className="rounded border border-line bg-surface px-2 py-0.5 text-fg-muted transition-colors hover:border-line-strong hover:text-fg"
             >
               Regenerate
             </button>
@@ -461,11 +461,11 @@ function SummarySection({
 function SummarySkeleton() {
   return (
     <div className="flex flex-col gap-3 animate-pulse">
-      <div className="h-3 w-full rounded bg-stone-200/80"></div>
-      <div className="h-3 w-5/6 rounded bg-stone-200/80"></div>
+      <div className="h-3 w-full rounded bg-line"></div>
+      <div className="h-3 w-5/6 rounded bg-line"></div>
       <div className="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-2">
-        <div className="h-12 rounded bg-stone-200/60"></div>
-        <div className="h-12 rounded bg-stone-200/60"></div>
+        <div className="h-12 rounded bg-line"></div>
+        <div className="h-12 rounded bg-line"></div>
       </div>
     </div>
   );

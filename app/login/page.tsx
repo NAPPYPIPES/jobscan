@@ -10,10 +10,10 @@ export default async function LoginPage({
   return (
     <main className="mx-auto flex min-h-[80vh] max-w-md items-center px-6">
       <div className="w-full">
-        <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">
+        <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-fg-subtle">
           pub-ats-radar
         </p>
-        <h1 className="mb-8 text-3xl font-semibold tracking-tight text-stone-900">
+        <h1 className="mb-8 text-3xl font-semibold tracking-tight text-fg">
           Sign in
         </h1>
         <form
@@ -27,14 +27,14 @@ export default async function LoginPage({
             autoFocus
             required
             placeholder="Passphrase"
-            className="rounded-lg border border-stone-300 bg-white px-4 py-3 text-[15px] text-stone-900 placeholder:text-stone-400 focus:border-stone-900 focus:outline-none"
+            className="rounded-lg border border-line-strong bg-input px-4 py-3 text-[15px] text-fg placeholder:text-fg-faint focus:border-fg focus:outline-none"
           />
           {hasError ? (
-            <p className="text-[13px] text-red-600">Wrong passphrase.</p>
+            <p className="text-[13px] text-rose-600 dark:text-rose-400">Wrong passphrase.</p>
           ) : null}
           <button
             type="submit"
-            className="rounded-lg bg-stone-900 px-4 py-3 text-[14px] font-medium text-white hover:bg-stone-800"
+            className="rounded-lg bg-fg px-4 py-3 text-[14px] font-medium text-canvas transition-opacity hover:opacity-90"
           >
             Continue
           </button>
