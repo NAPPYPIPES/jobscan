@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ManualCompany, ManualSector } from "@/db/manual-companies";
+import type { Role } from "@/lib/auth/cookie";
 import {
   BORDER_CLASSES,
   getStaleness,
@@ -17,22 +18,45 @@ import {
 
 type LastChecked = Record<string, string>;
 
-export default function ManualChecklist({ companies }: { companies: ManualCompany[] }) {
+const DEMO_TOOLTIP = "Demo mode — opens the careers page but doesn't record a check.";
+
+export default function ManualChecklist({
+  companies,
+  viewerRole,
+}: {
+  companies: ManualCompany[];
+  viewerRole: Role;
+}) {
+  const isDemo = viewerRole === "demo";
   const [lastChecked, setLastChecked] = useState<LastChecked>({});
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
+    // In demo mode there's no per-viewer check history — skip the
+    // status fetch entirely. The cards still render (showing
+    // "Never checked" in the staleness ring), which honestly makes
+    // the demo experience cleaner: no real-user check timestamps
+    // leaking into the demo view.
+    if (isDemo) {
+      setLoaded(true);
+      return;
+    }
     fetch("/api/manual/status")
       .then((r) => r.json())
       .then((d: { lastChecked: LastChecked }) => setLastChecked(d.lastChecked ?? {}))
       .catch(() => setLastChecked({}))
       .finally(() => setLoaded(true));
-  }, []);
+  }, [isDemo]);
 
   // Optimistic update: stamp now() locally so the card flips state
   // before the POST returns. The POST is fire-and-forget — failure
   // is silent (next page load will reconcile from DB).
+  // Demo viewers skip the POST entirely; the link still opens, but
+  // we don't write to the manual_checks ledger (which would also
+  // fail server-side via requireOwner, but skipping client-side
+  // avoids a misleading "now checked" optimistic flip).
   function handleCheck(name: string) {
+    if (isDemo) return;
     const nowIso = new Date().toISOString();
     setLastChecked((prev) => ({ ...prev, [name]: nowIso }));
     fetch("/api/manual/check", {
@@ -85,6 +109,7 @@ export default function ManualChecklist({ companies }: { companies: ManualCompan
             lastChecked={lastChecked[c.name]}
             staleness={stalenessByName[c.name]}
             onCheck={() => handleCheck(c.name)}
+            isDemo={isDemo}
           />
         ))}
       </div>
@@ -97,13 +122,21 @@ function CompanyCard({
   lastChecked,
   staleness,
   onCheck,
+  isDemo,
 }: {
   company: ManualCompany;
   lastChecked: string | undefined;
   staleness: Staleness;
   onCheck: () => void;
+  isDemo: boolean;
 }) {
   const isChecked = staleness === "today";
+  const linkTitle = isDemo ? DEMO_TOOLTIP : undefined;
+  const ctaLabel = isDemo
+    ? "Open careers page →"
+    : isChecked
+      ? "Checked today — revisit"
+      : "Check now →";
   return (
     <div
       className={`flex h-full flex-col rounded-xl bg-surface p-5 transition-colors ${BORDER_CLASSES[staleness]}`}
@@ -132,13 +165,14 @@ function CompanyCard({
         target="_blank"
         rel="noopener noreferrer"
         onClick={onCheck}
+        title={linkTitle}
         className={`mt-4 block w-full rounded-lg px-4 py-2 text-center text-sm font-medium transition-colors ${
           isChecked
             ? "bg-muted text-fg-muted hover:bg-line"
             : "bg-fg text-canvas hover:opacity-90"
         }`}
       >
-        {isChecked ? "Checked today — revisit" : "Check now →"}
+        {ctaLabel}
       </a>
     </div>
   );

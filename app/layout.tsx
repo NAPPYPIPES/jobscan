@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import Nav from "./_components/nav";
+import DemoBanner from "./_components/demo-banner";
+import { getViewerRole } from "@/lib/auth/viewer";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -31,17 +33,22 @@ const themeInitScript = `
 })();
 `;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Read role on the server so the banner-or-not decision is baked
+  // into SSR output. The middleware sets x-par-role on every
+  // authenticated request; reading it here is a single header lookup.
+  const role = await getViewerRole();
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-screen bg-canvas font-sans text-fg antialiased">
+        <DemoBanner show={role === "demo"} />
         <Nav />
         {children}
       </body>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { setMatchStatus } from "@/db/matches";
 import type { MatchStatus } from "@/db/schema";
+import { requireOwner } from "@/lib/auth/viewer";
 
 // PATCH /api/matches/{id}  body: { status: MatchStatus }
 //
@@ -13,6 +14,9 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = await requireOwner();
+  if (denied) return denied;
+
   const { id } = await params;
 
   let body: unknown;

@@ -3,6 +3,8 @@ import { getDb } from "./client";
 import { matches, targets } from "./schema";
 import { LEVEL_ORDER, type CompanyResult } from "@/lib/scan/types";
 import type { Match, MatchStatus } from "./schema";
+import { DEMO_SLUGS_ARRAY } from "@/lib/auth/demo-allowlist";
+import type { Role } from "@/lib/auth/cookie";
 
 // Read all non-dismissed matches for the UI. Sorted by level rank (BV →
 // LOW), then first_seen DESC within each level, so the highest-priority
@@ -19,6 +21,10 @@ export async function getActiveMatches(
   opts: {
     excludeApplied?: boolean;
     excludeBaseline?: boolean;
+    // Demo viewers see only the curated subset of slugs. Owner mode
+    // (default) sees all 133. The DB stores rows for every company
+    // — filtering is purely at read time.
+    role?: Role;
   } = {},
 ): Promise<Match[]> {
   const db = getDb();
@@ -29,6 +35,9 @@ export async function getActiveMatches(
   const conditions = [ne(matches.status, "dismissed"), isNull(matches.closedAt)];
   if (opts.excludeApplied) conditions.push(ne(matches.status, "applied"));
   if (opts.excludeBaseline) conditions.push(eq(matches.isBaseline, false));
+  if (opts.role === "demo") {
+    conditions.push(inArray(matches.companySlug, DEMO_SLUGS_ARRAY as string[]));
+  }
   const rows = await db
     .select()
     .from(matches)

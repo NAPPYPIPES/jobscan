@@ -7,6 +7,7 @@ import { getCompanyDescription, getCurrentMonthSpend } from "@/lib/fit/score";
 import { CURRENT_PROMPT_VERSION, generateSummary } from "@/lib/fit/summary-prompt";
 import { sectorForSlug, stageForSlug } from "@/db/targets";
 import { getUserProfile } from "@/db/profile";
+import { requireOwner } from "@/lib/auth/viewer";
 
 // Claude Haiku 4.5 takes 5-15s for a generate. Vercel Hobby defaults
 // to 10s for serverless functions, so the function gets killed mid-
@@ -43,6 +44,12 @@ async function handlePost(
   req: Request,
   params: Promise<{ id: string }>,
 ) {
+  // Hard block: every Claude call here costs real money on the
+  // owner's API key. Demo viewers must never be able to trigger one,
+  // even by hitting the route directly past the disabled UI button.
+  const denied = await requireOwner();
+  if (denied) return denied;
+
   const { id } = await params;
   const url = new URL(req.url);
   const force = url.searchParams.get("force") === "true";

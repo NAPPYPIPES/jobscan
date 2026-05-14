@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { matches } from "@/db/schema";
 import type { DismissReason } from "@/db/schema";
+import { requireOwner } from "@/lib/auth/viewer";
 
 // PATCH /api/matches/{id}/dismiss
 // body: { reasons?: DismissReason[] }
@@ -26,6 +27,9 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = await requireOwner();
+  if (denied) return denied;
+
   const { id } = await params;
 
   let body: unknown = {};

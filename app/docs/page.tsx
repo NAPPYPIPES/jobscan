@@ -1,8 +1,10 @@
-import { and, desc, eq, gte, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { apiUsage, matches } from "@/db/schema";
 import { getTargets } from "@/db/targets";
 import { getManualCompanies } from "@/db/manual-companies";
+import { getViewerRole } from "@/lib/auth/viewer";
+import { DEMO_SLUGS_ARRAY } from "@/lib/auth/demo-allowlist";
 import type { Sector } from "@/lib/scan/types";
 import { DEFAULT_RUBRIC } from "@/lib/fit/rubric";
 import type { Level } from "@/lib/scan/types";
@@ -41,11 +43,18 @@ function longDate(d: Date | null | undefined): string {
 
 export default async function Docs() {
   const db = getDb();
+  const viewerRole = await getViewerRole();
+  const isDemo = viewerRole === "demo";
+  const demoSlugFilter = isDemo
+    ? [inArray(matches.companySlug, DEMO_SLUGS_ARRAY as string[])]
+    : [];
 
   // Pre-fetch targets + manual list from DB. Both cached in their
   // respective db/* modules so this is sub-ms on warm requests.
+  // Demo viewers see the curated targets subset; manual list is the
+  // same for both (it's already a small curated list).
   const [targets, manualCompanies] = await Promise.all([
-    getTargets(),
+    getTargets({ role: viewerRole }),
     getManualCompanies(),
   ]);
   // Inline sector helper using the fetched rows — avoids touching the
@@ -64,62 +73,92 @@ export default async function Docs() {
       lastSeen: sql<string | null>`max(${matches.lastSeen})`,
     })
     .from(matches)
-    .where(and(ne(matches.status, "dismissed"), isNull(matches.closedAt)))
+    .where(
+      and(
+        ne(matches.status, "dismissed"),
+        isNull(matches.closedAt),
+        ...demoSlugFilter,
+      ),
+    )
     .groupBy(matches.companySlug);
   const slugStats = new Map(perSlug.map((r) => [r.companySlug, r]));
 
-  // Month-to-date API spend.
-  const start = new Date();
-  start.setUTCDate(1);
-  start.setUTCHours(0, 0, 0, 0);
-  const spendRows = await db
-    .select({ total: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text` })
-    .from(apiUsage)
-    .where(gte(apiUsage.calledAt, start));
-  const mtdSpend = parseFloat(spendRows[0]?.total ?? "0");
+  // ─── API spend (owner-only — skipped entirely in demo mode) ───────
+  // Demo viewers must not see the owner's actual API spending. The
+  // queries are skipped (no DB roundtrip) and the rendered section
+  // is gated on !isDemo below.
+  type RecentCallRow = {
+    calledAt: Date;
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: string;
+    model: string;
+    purpose: string;
+    title: string | null;
+    companyDisplayName: string | null;
+    fitScore: string | null;
+  };
+  let mtdSpend = 0;
+  let dailySpend: DailySpendRow[] = [];
+  let recentCalls: RecentCallRow[] = [];
+  if (!isDemo) {
+    const start = new Date();
+    start.setUTCDate(1);
+    start.setUTCHours(0, 0, 0, 0);
+    const spendRows = await db
+      .select({ total: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text` })
+      .from(apiUsage)
+      .where(gte(apiUsage.calledAt, start));
+    mtdSpend = parseFloat(spendRows[0]?.total ?? "0");
 
-  // Daily spend over the last 90 days.
-  const dailySpendRows = await db
-    .select({
-      date: sql<string>`to_char(date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC'), 'YYYY-MM-DD')`,
-      total: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text`,
-    })
-    .from(apiUsage)
-    .where(gte(apiUsage.calledAt, sql`now() - interval '90 days'`))
-    .groupBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`)
-    .orderBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`);
-  const dailySpend: DailySpendRow[] = dailySpendRows.map((r) => ({
-    date: r.date,
-    spendUsd: parseFloat(r.total),
-  }));
+    const dailySpendRows = await db
+      .select({
+        date: sql<string>`to_char(date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC'), 'YYYY-MM-DD')`,
+        total: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text`,
+      })
+      .from(apiUsage)
+      .where(gte(apiUsage.calledAt, sql`now() - interval '90 days'`))
+      .groupBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`)
+      .orderBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`);
+    dailySpend = dailySpendRows.map((r) => ({
+      date: r.date,
+      spendUsd: parseFloat(r.total),
+    }));
 
-  // Last 20 API calls joined to matches for context.
-  const recentCalls = await db
-    .select({
-      calledAt: apiUsage.calledAt,
-      tokensIn: apiUsage.tokensIn,
-      tokensOut: apiUsage.tokensOut,
-      costUsd: apiUsage.costUsd,
-      model: apiUsage.model,
-      purpose: apiUsage.purpose,
-      title: matches.title,
-      companyDisplayName: matches.companyDisplayName,
-      fitScore: matches.fitScore,
-    })
-    .from(apiUsage)
-    .leftJoin(matches, eq(apiUsage.matchId, matches.id))
-    .orderBy(desc(apiUsage.calledAt))
-    .limit(20);
+    recentCalls = await db
+      .select({
+        calledAt: apiUsage.calledAt,
+        tokensIn: apiUsage.tokensIn,
+        tokensOut: apiUsage.tokensOut,
+        costUsd: apiUsage.costUsd,
+        model: apiUsage.model,
+        purpose: apiUsage.purpose,
+        title: matches.title,
+        companyDisplayName: matches.companyDisplayName,
+        fitScore: matches.fitScore,
+      })
+      .from(apiUsage)
+      .leftJoin(matches, eq(apiUsage.matchId, matches.id))
+      .orderBy(desc(apiUsage.calledAt))
+      .limit(20);
+  }
 
   // Scanner stats — totals + per-level breakdown. Closed rows
   // excluded so "Total open" matches what /all actually displays.
+  // Demo viewers see the same KPIs but scoped to their allowlist.
   const totalsRows = await db
     .select({
       total: sql<number>`count(*)::int`,
       scored: sql<number>`count(${matches.fitScore})::int`,
     })
     .from(matches)
-    .where(and(ne(matches.status, "dismissed"), isNull(matches.closedAt)));
+    .where(
+      and(
+        ne(matches.status, "dismissed"),
+        isNull(matches.closedAt),
+        ...demoSlugFilter,
+      ),
+    );
   const total = totalsRows[0]?.total ?? 0;
   const scoredCount = totalsRows[0]?.scored ?? 0;
 
@@ -129,14 +168,21 @@ export default async function Docs() {
       count: sql<number>`count(*)::int`,
     })
     .from(matches)
-    .where(and(ne(matches.status, "dismissed"), isNull(matches.closedAt)))
+    .where(
+      and(
+        ne(matches.status, "dismissed"),
+        isNull(matches.closedAt),
+        ...demoSlugFilter,
+      ),
+    )
     .groupBy(matches.level);
   const byLevel: Record<Level, number> = { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
   for (const r of byLevelRows) byLevel[r.level as Level] = r.count;
 
   const lastScanRows = await db
     .select({ ts: sql<string | null>`max(${matches.lastSeen})` })
-    .from(matches);
+    .from(matches)
+    .where(isDemo ? and(...demoSlugFilter) : undefined);
   const lastScan = lastScanRows[0]?.ts;
 
   return (
@@ -297,6 +343,7 @@ export default async function Docs() {
         </div>
       </Section>
 
+      {!isDemo && (
       <Section title="API usage &amp; cost">
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
@@ -388,6 +435,7 @@ export default async function Docs() {
           <DailySpendChart data={dailySpend} />
         </div>
       </Section>
+      )}
 
       <Section title="Scanner stats">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

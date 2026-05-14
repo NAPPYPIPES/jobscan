@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { getActiveMatches } from "@/db/matches";
 import { getTargets } from "@/db/targets";
+import { getViewerRole } from "@/lib/auth/viewer";
 import type { Sector } from "@/lib/scan/types";
 import { jobUrl } from "@/lib/scan/urls";
 import MatchesView from "../_components/matches-view";
@@ -8,9 +9,10 @@ import MatchesView from "../_components/matches-view";
 export const dynamic = "force-dynamic";
 
 export default async function AllOpen() {
+  const viewerRole = await getViewerRole();
   const [matches, targets] = await Promise.all([
-    getActiveMatches(),
-    getTargets(),
+    getActiveMatches({ role: viewerRole }),
+    getTargets({ role: viewerRole }),
   ]);
 
   const sectorBySlug: Record<string, Sector> = Object.fromEntries(
@@ -40,7 +42,7 @@ export default async function AllOpen() {
       </div>
 
       <Suspense fallback={null}>
-        <MatchesView matches={enriched} mode="all" sectorBySlug={sectorBySlug} />
+        <MatchesView matches={enriched} mode="all" sectorBySlug={sectorBySlug} viewerRole={viewerRole} />
       </Suspense>
     </main>
   );

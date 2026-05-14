@@ -4,12 +4,18 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Match, DismissReason } from "@/db/schema";
 import type { Level } from "@/lib/scan/types";
+import type { Role } from "@/lib/auth/cookie";
 
 // Apply URL is pre-computed server-side (in page.tsx / all/page.tsx)
 // and threaded onto each row. Keeps the client bundle free of
 // @/lib/scan/urls → @/lib/scan/workday-config → @/lib/config/load,
 // which pulls node:fs.
 export type MatchWithUrl = Match & { applyUrl: string };
+
+// Tooltip applied to every disabled mutation control in demo mode.
+// Server-side requireOwner() is the real gate; this is just UX
+// surfacing of why the buttons don't respond.
+const DEMO_TOOLTIP = "Demo mode — actions disabled. Fork to make it yours.";
 
 type SummaryData = {
   summary: string;
@@ -82,11 +88,14 @@ export default function MatchCard({
   m,
   isSummaryOpen,
   onToggleSummary,
+  viewerRole,
 }: {
   m: MatchWithUrl;
   isSummaryOpen: boolean;
   onToggleSummary: () => void;
+  viewerRole: Role;
 }) {
+  const isDemo = viewerRole === "demo";
   const href = m.applyUrl;
   const router = useRouter();
   const [applied, setApplied] = useState(m.status === "applied");
@@ -99,7 +108,10 @@ export default function MatchCard({
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
-  const canSummarize = m.level !== "LOW";
+  // Demo mode disables both interactive AND spend-burning paths:
+  // can't apply, can't dismiss, can't fetch a fresh AI summary
+  // (each summary call costs real $ on the owner's API key).
+  const canSummarize = m.level !== "LOW" && !isDemo;
 
   // Fetch the summary the first time the card is opened. Deps are
   // narrow on purpose — state setters are NOT in deps. Including them
@@ -298,6 +310,18 @@ export default function MatchCard({
             {m.location}
           </span>
         </a>
+        {isDemo && m.level !== "LOW" && (
+          <span
+            title={DEMO_TOOLTIP}
+            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-fg-faint opacity-60"
+            aria-label="AI analysis disabled in demo mode"
+          >
+            <span>AI</span>
+            <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M3 4.5 L6 7.5 L9 4.5" />
+            </svg>
+          </span>
+        )}
         {canSummarize && (
           <button
             type="button"
@@ -329,25 +353,41 @@ export default function MatchCard({
           type="button"
           role="switch"
           aria-checked={applied}
-          aria-label={applied ? "Mark not applied" : "Mark applied"}
-          onClick={onToggle}
-          disabled={pending}
-          className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors disabled:cursor-wait ${
-            applied ? "bg-emerald-500" : "bg-line hover:bg-line-strong"
+          aria-label={
+            isDemo
+              ? "Apply toggle disabled in demo mode"
+              : applied
+                ? "Mark not applied"
+                : "Mark applied"
+          }
+          onClick={isDemo ? (e) => { e.preventDefault(); e.stopPropagation(); } : onToggle}
+          disabled={pending || isDemo}
+          title={isDemo ? DEMO_TOOLTIP : undefined}
+          className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed ${
+            isDemo
+              ? "bg-line opacity-50"
+              : applied
+                ? "bg-emerald-500"
+                : "bg-line hover:bg-line-strong"
           }`}
         >
           <span
             className={`inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition-transform ${
-              applied ? "translate-x-3.5" : "translate-x-0.5"
+              applied && !isDemo ? "translate-x-3.5" : "translate-x-0.5"
             }`}
           />
         </button>
         <button
           type="button"
-          aria-label="Dismiss this role"
-          onClick={onDismissClick}
-          disabled={pending}
-          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-fg-faint transition-colors hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 disabled:cursor-wait"
+          aria-label={isDemo ? "Dismiss disabled in demo mode" : "Dismiss this role"}
+          onClick={isDemo ? (e) => { e.preventDefault(); e.stopPropagation(); } : onDismissClick}
+          disabled={pending || isDemo}
+          title={isDemo ? DEMO_TOOLTIP : undefined}
+          className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-fg-faint transition-colors disabled:cursor-not-allowed ${
+            isDemo
+              ? "opacity-40"
+              : "hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 disabled:cursor-wait"
+          }`}
         >
           <svg
             className="h-2.5 w-2.5"

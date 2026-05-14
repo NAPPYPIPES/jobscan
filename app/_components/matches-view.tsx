@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Level, Sector } from "@/lib/scan/types";
+import type { Role } from "@/lib/auth/cookie";
 import FilterBar, { type Since, type Sort, ALL_SORTS } from "./filter-bar";
 import MatchCard, { type MatchWithUrl } from "./match-card";
 import CompanyHeader from "./company-header";
@@ -44,9 +45,13 @@ type Props = {
   // Slug → sector lookup, built server-side in the page component.
   // Avoids the client having to import the server-only targets module.
   sectorBySlug: Record<string, Sector>;
+  // Resolved by the server page from the x-par-role middleware
+  // header. Threaded through to every MatchCard so demo viewers get
+  // disabled mutation controls + tooltips.
+  viewerRole: Role;
 };
 
-export default function MatchesView({ matches, mode, sectorBySlug }: Props) {
+export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }: Props) {
   const router = useRouter();
   const params = useSearchParams();
   const sectorForSlug = makeSectorLookup(sectorBySlug);
@@ -324,6 +329,7 @@ export default function MatchesView({ matches, mode, sectorBySlug }: Props) {
                             m={m}
                             isSummaryOpen={openSummaryId === m.id}
                             onToggleSummary={() => onToggleSummary(m.id)}
+                            viewerRole={viewerRole}
                           />
                         </li>
                       ))}

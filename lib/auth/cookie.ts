@@ -1,13 +1,24 @@
-// Edge-compatible HMAC-SHA256 session cookie. Single-user, single-bit
-// auth: the cookie value IS the signature of a fixed payload — there's
-// no user identity, no expiry baked in (the cookie's Max-Age handles
-// that), no DB session table. Verifying just recomputes the HMAC from
-// the same fixed payload + AUTH_SECRET and constant-time compares via
-// crypto.subtle.verify.
+// Edge-compatible HMAC-SHA256 session cookie. The cookie value IS the
+// signature of a fixed-per-role payload — no JSON parsing of attacker-
+// controlled bytes, no user identity beyond the role, no DB session
+// table. Verifying tries each known role's payload via
+// crypto.subtle.verify (constant-time per spec) and returns whichever
+// matches, or null.
+//
+// Two roles today:
+//   owner — the maintainer; full read + write
+//   demo  — anonymous demo viewer; read-only, scoped to a curated
+//           subset of companies (see lib/auth/demo-allowlist.ts)
 //
 // Rotating AUTH_SECRET invalidates every existing cookie (intended).
 
-const PAYLOAD = "v1:authed";
+export type Role = "owner" | "demo";
+
+const PAYLOAD: Record<Role, string> = {
+  owner: "v1:authed:owner",
+  demo: "v1:authed:demo",
+};
+const ROLES: Role[] = ["owner", "demo"];
 
 async function importKey(secret: string): Promise<CryptoKey> {
   return crypto.subtle.importKey(
@@ -35,19 +46,39 @@ function fromBase64Url(s: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-export async function signSession(secret: string): Promise<string> {
+export async function signSession(secret: string, role: Role): Promise<string> {
   const key = await importKey(secret);
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(PAYLOAD));
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(PAYLOAD[role]),
+  );
   return toBase64Url(sig);
 }
 
-export async function verifySession(cookie: string, secret: string): Promise<boolean> {
-  if (!cookie) return false;
+// Try each role's payload. Returns the matching role, or null. The
+// per-role verify is independent — an attacker can't substitute one
+// role's signature for another, and there's nothing in the cookie
+// other than the signature itself (no parsed bytes, no JWT header).
+export async function verifySession(
+  cookie: string,
+  secret: string,
+): Promise<Role | null> {
+  if (!cookie) return null;
   try {
     const key = await importKey(secret);
     const sig = fromBase64Url(cookie);
-    return await crypto.subtle.verify("HMAC", key, sig, new TextEncoder().encode(PAYLOAD));
+    for (const role of ROLES) {
+      const ok = await crypto.subtle.verify(
+        "HMAC",
+        key,
+        sig,
+        new TextEncoder().encode(PAYLOAD[role]),
+      );
+      if (ok) return role;
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }

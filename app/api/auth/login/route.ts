@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
-import { signSession } from "@/lib/auth/cookie";
+import { signSession, type Role } from "@/lib/auth/cookie";
 
 // Node runtime so timingSafeEqual is available. The middleware's
 // verify path stays on Edge — crypto.subtle.verify is constant-time
@@ -16,19 +16,35 @@ function eqConstTime(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
+// Resolve the submitted password to a role. Owner check first because
+// it's the more sensitive credential; demo check runs unconditionally
+// (not gated on owner failing) so the comparisons take the same time
+// regardless of which password the user submitted — protects against
+// timing-distinguishing the two paths.
+function resolveRole(submitted: string): Role | null {
+  const ownerExpected = process.env.PERSONAL_PASS ?? "";
+  const demoExpected = process.env.DEMO_PASS ?? "";
+  let matched: Role | null = null;
+  if (ownerExpected && eqConstTime(submitted, ownerExpected)) matched = "owner";
+  if (demoExpected && eqConstTime(submitted, demoExpected) && matched === null) {
+    matched = "demo";
+  }
+  return matched;
+}
+
 export async function POST(req: Request) {
   const form = await req.formData();
   const submitted = String(form.get("password") ?? "");
-  const expected = process.env.PERSONAL_PASS ?? "";
   const secret = process.env.AUTH_SECRET ?? "";
-  if (!expected || !secret) {
-    console.error("[auth] PERSONAL_PASS or AUTH_SECRET not set — refusing login");
+  if (!secret) {
+    console.error("[auth] AUTH_SECRET not set — refusing login");
     return NextResponse.redirect(new URL("/login?error=1", req.url), { status: 303 });
   }
-  if (!eqConstTime(submitted, expected)) {
+  const role = resolveRole(submitted);
+  if (!role) {
     return NextResponse.redirect(new URL("/login?error=1", req.url), { status: 303 });
   }
-  const value = await signSession(secret);
+  const value = await signSession(secret, role);
   const res = NextResponse.redirect(new URL("/", req.url), { status: 303 });
   // secure: false in dev so the cookie sets over plain http://localhost.
   // In production (Vercel) every request is HTTPS so secure: true is fine.

@@ -1,8 +1,10 @@
-import { and, asc, desc, eq, gte, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { apiUsage, matches, targets } from "@/db/schema";
 import { jobUrl } from "@/lib/scan/urls";
 import type { Level } from "@/lib/scan/types";
+import { getViewerRole } from "@/lib/auth/viewer";
+import { DEMO_SLUGS_ARRAY } from "@/lib/auth/demo-allowlist";
 import TopCompaniesList, {
   type CompanyData,
 } from "../_components/top-companies-list";
@@ -28,6 +30,16 @@ const SCAN_STALE_THRESHOLD_MINUTES = 90;
 
 export default async function Analytics() {
   const db = getDb();
+  const viewerRole = await getViewerRole();
+  const isDemo = viewerRole === "demo";
+
+  // Reusable slug filter for every query that produces match-derived
+  // aggregates. Owner sees all rows; demo viewers see only the
+  // curated allowlist. Inserted via spread into each query's
+  // and(...) — no-op when the array is empty (it never is).
+  const demoSlugFilter = isDemo
+    ? [inArray(matches.companySlug, DEMO_SLUGS_ARRAY as string[])]
+    : [];
 
   // ─── Activity (last 72h) — three trend widgets ─────────────────────
   // Single pass through the 72h slice of matches, bucketed three ways
@@ -51,6 +63,7 @@ export default async function Analytics() {
         ne(matches.status, "dismissed"),
         eq(matches.isBaseline, false),
         isNull(matches.closedAt),
+        ...demoSlugFilter,
       ),
     )
     .groupBy(matches.level);
@@ -67,6 +80,17 @@ export default async function Analytics() {
   // Fit band query — 24h slice, bucket by fit_score. Uses CASE because
   // we want a derived label, not the raw numeric value, and the four
   // bands aren't equal-width so width_bucket() would be awkward.
+  // Drizzle's sql template expands arrays as comma-separated
+  // placeholders ($1, $2, ..., $N), so wrapping with `ANY(...)` ends
+  // up as `ANY(($1, $2, ..., $N))` — a record, not an array, which
+  // Postgres rejects. JSONB round-trip is the cleanest workaround:
+  // bind the array as a single jsonb param, unpack server-side to a
+  // SETOF text, and use IN.
+  const fitBandDemoFilter = isDemo
+    ? sql` AND company_slug IN (SELECT jsonb_array_elements_text(${JSON.stringify(
+        DEMO_SLUGS_ARRAY,
+      )}::jsonb))`
+    : sql``;
   const byFitBandRows = await db.execute(
     sql`SELECT
       CASE
@@ -80,7 +104,7 @@ export default async function Analytics() {
     WHERE first_seen >= now() - interval '24 hours'
       AND status != 'dismissed'
       AND is_baseline = false
-      AND closed_at IS NULL
+      AND closed_at IS NULL${fitBandDemoFilter}
     GROUP BY band`,
   );
   const newRolesByFit: NewRolesByFitBand = {
@@ -110,6 +134,7 @@ export default async function Analytics() {
         ne(matches.status, "dismissed"),
         eq(matches.isBaseline, false),
         isNull(matches.closedAt),
+        ...demoSlugFilter,
       ),
     )
     .groupBy(matches.companySlug, matches.companyDisplayName);
@@ -135,6 +160,7 @@ export default async function Analytics() {
         ne(matches.status, "dismissed"),
         eq(matches.isBaseline, false),
         isNull(matches.closedAt),
+        ...demoSlugFilter,
       ),
     )
     .groupBy(matches.companySlug, matches.companyDisplayName, matches.level);
@@ -161,7 +187,11 @@ export default async function Analytics() {
     .select({ count: sql<number>`count(*)::int` })
     .from(matches)
     .where(
-      and(ne(matches.status, "dismissed"), isNotNull(matches.closedAt)),
+      and(
+        ne(matches.status, "dismissed"),
+        isNotNull(matches.closedAt),
+        ...demoSlugFilter,
+      ),
     );
   const closedTotal = closedTotalRow[0]?.count ?? 0;
 
@@ -169,7 +199,11 @@ export default async function Analytics() {
     .select()
     .from(matches)
     .where(
-      and(ne(matches.status, "dismissed"), isNotNull(matches.closedAt)),
+      and(
+        ne(matches.status, "dismissed"),
+        isNotNull(matches.closedAt),
+        ...demoSlugFilter,
+      ),
     )
     .orderBy(desc(matches.closedAt))
     .limit(25);
@@ -192,6 +226,12 @@ export default async function Analytics() {
   const scanCutoffSql = sql`(SELECT max(${targets.lastSuccessAt}) FROM ${targets}) - interval '${sql.raw(
     String(SCAN_STALE_THRESHOLD_MINUTES),
   )} minutes'`;
+  // Demo viewers also get the slug filter on the targets table —
+  // otherwise the failing-scan list shows companies they shouldn't
+  // know about (Mastercard, Citi, etc. that fail more often).
+  const failingTargetsDemoFilter = isDemo
+    ? [inArray(targets.slug, DEMO_SLUGS_ARRAY as string[])]
+    : [];
   const failingRows = await db
     .select({
       slug: targets.slug,
@@ -201,9 +241,12 @@ export default async function Analytics() {
     })
     .from(targets)
     .where(
-      or(
-        isNull(targets.lastSuccessAt),
-        sql`${targets.lastSuccessAt} < ${scanCutoffSql}`,
+      and(
+        or(
+          isNull(targets.lastSuccessAt),
+          sql`${targets.lastSuccessAt} < ${scanCutoffSql}`,
+        ),
+        ...failingTargetsDemoFilter,
       ),
     )
     .orderBy(asc(targets.lastSuccessAt));
@@ -216,78 +259,89 @@ export default async function Analytics() {
       : null,
   }));
 
-  // ─── API spend (90 days of daily rows; chart aggregates to weekly client-side) ─
-  const dailySpendRows = await db
-    .select({
-      date: sql<string>`to_char(date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC'), 'YYYY-MM-DD')`,
-      total: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text`,
-    })
-    .from(apiUsage)
-    .where(gte(apiUsage.calledAt, sql`now() - interval '90 days'`))
-    .groupBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`)
-    .orderBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`);
-  const dailySpend: DailySpendRow[] = dailySpendRows.map((r) => ({
-    date: r.date,
-    spendUsd: parseFloat(r.total),
-  }));
+  // ─── Personal-data sections (skipped entirely in demo mode) ───────
+  // Dismissal patterns + API spend reveal the owner's actual
+  // job-search activity. Skip the queries to save round trips and
+  // avoid any chance of leakage into the rendered JSX. The
+  // corresponding sections render only when !isDemo.
+  let dailySpend: DailySpendRow[] = [];
+  let dismissByReason: Record<string, number> = {};
+  let noTagCount = 0;
+  let topDismissedCompanies: { company: string; count: number }[] = [];
+  let topDismissedTitles: { title: string; count: number }[] = [];
+  let recentWithUrls: { m: typeof matches.$inferSelect; url: string }[] = [];
 
-  // ─── Dismissals (existing) ─────────────────────────────────────────
-  const dismissByReasonRows = await db.execute(
-    sql`SELECT unnest(dismiss_reason) AS reason, count(*)::int AS count
-        FROM matches
-        WHERE status = 'dismissed' AND dismiss_reason IS NOT NULL
-        GROUP BY reason`,
-  );
-  const dismissByReason: Record<string, number> = {};
-  for (const r of dismissByReasonRows.rows as { reason: string; count: number }[]) {
-    dismissByReason[r.reason] = r.count;
+  if (!isDemo) {
+    const dailySpendRows = await db
+      .select({
+        date: sql<string>`to_char(date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC'), 'YYYY-MM-DD')`,
+        total: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text`,
+      })
+      .from(apiUsage)
+      .where(gte(apiUsage.calledAt, sql`now() - interval '90 days'`))
+      .groupBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`)
+      .orderBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`);
+    dailySpend = dailySpendRows.map((r) => ({
+      date: r.date,
+      spendUsd: parseFloat(r.total),
+    }));
+
+    const dismissByReasonRows = await db.execute(
+      sql`SELECT unnest(dismiss_reason) AS reason, count(*)::int AS count
+          FROM matches
+          WHERE status = 'dismissed' AND dismiss_reason IS NOT NULL
+          GROUP BY reason`,
+    );
+    for (const r of dismissByReasonRows.rows as { reason: string; count: number }[]) {
+      dismissByReason[r.reason] = r.count;
+    }
+    const noTagRow = await db.execute(
+      sql`SELECT count(*)::int AS count
+          FROM matches
+          WHERE status = 'dismissed' AND dismiss_reason IS NULL`,
+    );
+    noTagCount =
+      (noTagRow.rows[0] as { count: number } | undefined)?.count ?? 0;
+
+    const topDismissedCompaniesRows = await db.execute(
+      sql`SELECT company_display_name AS company, count(*)::int AS count
+          FROM matches
+          WHERE status = 'dismissed'
+          GROUP BY company_display_name
+          ORDER BY count DESC
+          LIMIT 5`,
+    );
+    topDismissedCompanies = topDismissedCompaniesRows.rows as {
+      company: string;
+      count: number;
+    }[];
+
+    const topDismissedTitlesRows = await db.execute(
+      sql`SELECT title, count(*)::int AS count
+          FROM matches
+          WHERE status = 'dismissed'
+          GROUP BY title
+          ORDER BY count DESC
+          LIMIT 10`,
+    );
+    topDismissedTitles = topDismissedTitlesRows.rows as {
+      title: string;
+      count: number;
+    }[];
+
+    const recentDismissed = await db
+      .select()
+      .from(matches)
+      .where(eq(matches.status, "dismissed"))
+      .orderBy(desc(matches.updatedAt))
+      .limit(25);
+    recentWithUrls = await Promise.all(
+      recentDismissed.map(async (m) => ({
+        m,
+        url: await jobUrl(m.ats, m.companySlug, m.jobId),
+      })),
+    );
   }
-  const noTagRow = await db.execute(
-    sql`SELECT count(*)::int AS count
-        FROM matches
-        WHERE status = 'dismissed' AND dismiss_reason IS NULL`,
-  );
-  const noTagCount =
-    (noTagRow.rows[0] as { count: number } | undefined)?.count ?? 0;
-
-  const topDismissedCompaniesRows = await db.execute(
-    sql`SELECT company_display_name AS company, count(*)::int AS count
-        FROM matches
-        WHERE status = 'dismissed'
-        GROUP BY company_display_name
-        ORDER BY count DESC
-        LIMIT 5`,
-  );
-  const topDismissedCompanies = topDismissedCompaniesRows.rows as {
-    company: string;
-    count: number;
-  }[];
-
-  const topDismissedTitlesRows = await db.execute(
-    sql`SELECT title, count(*)::int AS count
-        FROM matches
-        WHERE status = 'dismissed'
-        GROUP BY title
-        ORDER BY count DESC
-        LIMIT 10`,
-  );
-  const topDismissedTitles = topDismissedTitlesRows.rows as {
-    title: string;
-    count: number;
-  }[];
-
-  const recentDismissed = await db
-    .select()
-    .from(matches)
-    .where(eq(matches.status, "dismissed"))
-    .orderBy(desc(matches.updatedAt))
-    .limit(25);
-  const recentWithUrls = await Promise.all(
-    recentDismissed.map(async (m) => ({
-      m,
-      url: await jobUrl(m.ats, m.companySlug, m.jobId),
-    })),
-  );
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12 sm:py-16">
@@ -337,90 +391,96 @@ export default async function Analytics() {
         <TopCompaniesList companies={companies} />
       </div>
 
-      <section className="mb-10">
-        <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
-          API spend
-        </h2>
-        <DailySpendChart data={dailySpend} />
-      </section>
+      {!isDemo && (
+        <section className="mb-10">
+          <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
+            API spend
+          </h2>
+          <DailySpendChart data={dailySpend} />
+        </section>
+      )}
 
-      <section className="mb-10">
-        <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
-          Dismissals
-        </h2>
-        <p className="mb-4 text-sm text-fg-muted">
-          Tagged reasons when you dismiss a role from a card. Multi-select
-          — one row can carry multiple tags (e.g. wrong location + wrong
-          function).
-        </p>
-        <DismissalReasonBars counts={dismissByReason} noTag={noTagCount} />
+      {!isDemo && (
+        <section className="mb-10">
+          <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
+            Dismissals
+          </h2>
+          <p className="mb-4 text-sm text-fg-muted">
+            Tagged reasons when you dismiss a role from a card. Multi-select
+            — one row can carry multiple tags (e.g. wrong location + wrong
+            function).
+          </p>
+          <DismissalReasonBars counts={dismissByReason} noTag={noTagCount} />
 
-        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-              Top 5 dismissed companies
-            </h3>
-            {topDismissedCompanies.length === 0 ? (
-              <p className="text-sm text-fg-subtle">No dismissals yet.</p>
-            ) : (
-              <ul className="flex flex-col gap-1.5 text-sm">
-                {topDismissedCompanies.map((c) => (
-                  <li
-                    key={c.company}
-                    className="flex items-baseline justify-between"
-                  >
-                    <span className="text-fg-muted">{c.company}</span>
-                    <span className="font-mono tabular-nums text-fg-subtle">{c.count}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+                Top 5 dismissed companies
+              </h3>
+              {topDismissedCompanies.length === 0 ? (
+                <p className="text-sm text-fg-subtle">No dismissals yet.</p>
+              ) : (
+                <ul className="flex flex-col gap-1.5 text-sm">
+                  {topDismissedCompanies.map((c) => (
+                    <li
+                      key={c.company}
+                      className="flex items-baseline justify-between"
+                    >
+                      <span className="text-fg-muted">{c.company}</span>
+                      <span className="font-mono tabular-nums text-fg-subtle">{c.count}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+                Top 10 dismissed titles
+              </h3>
+              {topDismissedTitles.length === 0 ? (
+                <p className="text-sm text-fg-subtle">No dismissals yet.</p>
+              ) : (
+                <ul className="flex flex-col gap-1.5 text-sm">
+                  {topDismissedTitles.map((t, i) => (
+                    <li
+                      key={`${t.title}-${i}`}
+                      className="flex items-baseline justify-between gap-3"
+                    >
+                      <span className="min-w-0 truncate text-fg-muted">
+                        {t.title}
+                      </span>
+                      <span className="shrink-0 font-mono tabular-nums text-fg-subtle">
+                        {t.count}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-          <div className="rounded-lg border border-line bg-surface p-4 shadow-card">
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-              Top 10 dismissed titles
-            </h3>
-            {topDismissedTitles.length === 0 ? (
-              <p className="text-sm text-fg-subtle">No dismissals yet.</p>
-            ) : (
-              <ul className="flex flex-col gap-1.5 text-sm">
-                {topDismissedTitles.map((t, i) => (
-                  <li
-                    key={`${t.title}-${i}`}
-                    className="flex items-baseline justify-between gap-3"
-                  >
-                    <span className="min-w-0 truncate text-fg-muted">
-                      {t.title}
-                    </span>
-                    <span className="shrink-0 font-mono tabular-nums text-fg-subtle">
-                      {t.count}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      <section>
-        <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
-          Recent dismissals (last 25)
-        </h2>
-        {recentWithUrls.length === 0 ? (
-          <div className="empty-state p-6 text-center">
-            <p className="text-sm text-fg-subtle">
-              You haven&rsquo;t dismissed anything yet.
-            </p>
-          </div>
-        ) : (
-          <ul className="flex flex-col gap-1.5">
-            {recentWithUrls.map(({ m, url }) => (
-              <CompactRow key={m.id} m={m} applyUrl={url} timestamp="dismissed" muted />
-            ))}
-          </ul>
-        )}
-      </section>
+      {!isDemo && (
+        <section>
+          <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
+            Recent dismissals (last 25)
+          </h2>
+          {recentWithUrls.length === 0 ? (
+            <div className="empty-state p-6 text-center">
+              <p className="text-sm text-fg-subtle">
+                You haven&rsquo;t dismissed anything yet.
+              </p>
+            </div>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {recentWithUrls.map(({ m, url }) => (
+                <CompactRow key={m.id} m={m} applyUrl={url} timestamp="dismissed" muted />
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
     </main>
   );
 }

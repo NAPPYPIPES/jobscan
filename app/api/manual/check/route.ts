@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { manualChecks } from "@/db/schema";
 import { getValidManualCompanies } from "@/db/manual-companies";
+import { requireOwner } from "@/lib/auth/viewer";
 
 // POST /api/manual/check  body: { company: string }
 //
@@ -12,7 +13,13 @@ import { getValidManualCompanies } from "@/db/manual-companies";
 // the staleness ring on /manual reflects the LAST click, not the first.
 //
 // Auth: provided by the global middleware (par_session cookie).
+// Demo viewers are blocked here too — manual-check timestamps would
+// otherwise leak demo-viewer activity into the owner's daily-checklist
+// staleness signal.
 export async function POST(req: Request) {
+  const denied = await requireOwner();
+  if (denied) return denied;
+
   let body: unknown;
   try {
     body = await req.json();

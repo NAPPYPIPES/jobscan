@@ -1,4 +1,5 @@
 import { getManualCompanies } from "@/db/manual-companies";
+import { getViewerRole } from "@/lib/auth/viewer";
 import ManualChecklist from "./manual-checklist";
 
 // Server-side wrapper. Reads the manual checklist from DB and hands
@@ -8,7 +9,10 @@ import ManualChecklist from "./manual-checklist";
 export const dynamic = "force-dynamic";
 
 export default async function ManualPage() {
-  const companies = await getManualCompanies();
+  const [companies, viewerRole] = await Promise.all([
+    getManualCompanies(),
+    getViewerRole(),
+  ]);
   return (
     <main className="mx-auto max-w-5xl px-6 py-12 sm:py-16">
       <div className="mb-8 flex flex-col gap-2">
@@ -22,7 +26,7 @@ export default async function ManualPage() {
           Companies with custom ATSs &mdash; visit each careers page daily to
           catch new roles. Click the button to open and mark checked in one go.
         </p>
-        <ManualChecklist companies={companies} />
+        <ManualChecklist companies={companies} viewerRole={viewerRole} />
       </div>
     </main>
   );
