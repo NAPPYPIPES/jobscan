@@ -9,11 +9,14 @@ import { useEffect, useState } from "react";
 // "system" mode.
 //
 // Contract: state machine + storage key MUST match the inline script
-// in layout.tsx. Don't rename "par-theme" without updating both.
+// in layout.tsx. Don't rename "par-theme" or change the "light"
+// default without updating both. Light is the canonical brand
+// experience — users opt into dark / system explicitly.
 
 type Theme = "system" | "light" | "dark";
 
 const STORAGE_KEY = "par-theme";
+const DEFAULT_THEME: Theme = "light";
 
 function applyTheme(theme: Theme) {
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -22,15 +25,16 @@ function applyTheme(theme: Theme) {
 }
 
 export default function ThemeToggle() {
-  // SSR-safe initial state: assume "system" on the server. After
-  // mount we read the actual saved preference and re-render — the
-  // toggle UI may flicker once on first hydration, but the underlying
-  // theme class is already correct (set by the inline init script).
-  const [theme, setTheme] = useState<Theme>("system");
+  // SSR-safe initial state: assume the default ("light") on the
+  // server. After mount we read the actual saved preference and
+  // re-render — the toggle UI may flicker once on first hydration,
+  // but the underlying theme class is already correct (set by the
+  // inline init script).
+  const [theme, setTheme] = useState<Theme>(DEFAULT_THEME);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const saved = (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? "system";
+    const saved = (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? DEFAULT_THEME;
     setTheme(saved);
     setMounted(true);
   }, []);

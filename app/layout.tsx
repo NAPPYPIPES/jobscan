@@ -12,17 +12,19 @@ export const metadata: Metadata = {
 };
 
 // Theme init has to land before first paint, otherwise dark-preference
-// users see a flash of light. Inlined into <head> as a sync script;
-// reads the persisted choice from localStorage and falls back to the
-// OS preference. Keep this in lockstep with the toggle in
-// _components/theme-toggle.tsx — both must agree on the storage key
-// and the {system|light|dark} state machine.
+// users see a flash of the wrong theme. Inlined into <head> as a sync
+// script; reads the persisted choice from localStorage and falls back
+// to LIGHT (not system) — light is the canonical brand experience and
+// users opt into dark or system tracking explicitly via the toggle.
+// Keep this in lockstep with _components/theme-toggle.tsx — both must
+// agree on the storage key, the {system|light|dark} state machine,
+// and the "light" default when nothing is saved.
 const themeInitScript = `
 (function() {
   try {
     var saved = localStorage.getItem('par-theme');
+    var theme = saved || 'light';
     var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    var theme = saved || 'system';
     var isDark = theme === 'dark' || (theme === 'system' && prefersDark);
     if (isDark) document.documentElement.classList.add('dark');
   } catch (e) {}
