@@ -428,6 +428,10 @@ export async function scoreUnscoredEligibleFromDb(opts: {
         inArray(matches.level, ["BV", "HIGH", "MEDIUM"]),
         inArray(matches.ats, ["greenhouse", "ashby", "lever"]),
         ne(matches.status, "dismissed"),
+        // Don't burn API spend scoring rows the scanner already
+        // confirmed have closed at the ATS — they wouldn't appear
+        // in /all anyway.
+        isNull(matches.closedAt),
       ),
     )
     .orderBy(desc(matches.firstSeen));

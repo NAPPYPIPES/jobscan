@@ -50,6 +50,15 @@ export const matches = pgTable(
     // Array of DismissReason values. Null when the user dismissed without
     // tagging anything.
     dismissReason: text("dismiss_reason").array().$type<DismissReason[]>(),
+    // Set by the scanner when a previously-seen row stops being returned
+    // by its ATS — i.e., the listing closed. Cleared back to null on
+    // upsert if the same (ats, slug, job_id) reappears in a later scan
+    // (rare, but happens). Only set for slugs whose scan succeeded in
+    // the run that detected the absence; a fetch failure leaves
+    // closed_at untouched so a broken API doesn't auto-close everything
+    // for that company. Read paths default to closed_at IS NULL so
+    // /all and the digest exclude closed rows automatically.
+    closedAt: timestamp("closed_at", { withTimezone: true }),
     // Claude-API-driven fit score for BV/HIGH/MEDIUM new roles. Populated
     // only when (a) role is BV/HIGH/MEDIUM at first-insert, (b) ATS provides
     // a description (Greenhouse/Ashby/Lever — Workday/SR are skipped),
@@ -197,6 +206,13 @@ export const targets = pgTable("targets", {
   displayName: text("display_name").notNull(),
   sector: text("sector").$type<Sector>(),
   stage: text("stage").$type<CompanyStage>(),
+  // Set by the scanner after a successful per-target fetch — even if
+  // the scan returned zero jobs (a successful zero is meaningful: it
+  // means the company has no postings, which lets us close stale
+  // matches). Stays null until the first successful scan, so a
+  // newly-added target reads as "not yet scanned" rather than "failing".
+  // The closed-roles + scan-failure detection both key off this.
+  lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

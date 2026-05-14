@@ -1,6 +1,6 @@
-import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { getDb } from "./client";
-import { matches } from "./schema";
+import { matches, targets } from "./schema";
 import { LEVEL_ORDER, type CompanyResult } from "@/lib/scan/types";
 import type { Match, MatchStatus } from "./schema";
 
@@ -22,7 +22,11 @@ export async function getActiveMatches(
   } = {},
 ): Promise<Match[]> {
   const db = getDb();
-  const conditions = [ne(matches.status, "dismissed")];
+  // closed_at IS NULL is the new default — closed rows (scanner saw
+  // them lapse from the ATS) shouldn't appear in /all or /. The
+  // analytics "Likely closed" widget reads closed_at IS NOT NULL
+  // directly; nothing else should need to opt back in.
+  const conditions = [ne(matches.status, "dismissed"), isNull(matches.closedAt)];
   if (opts.excludeApplied) conditions.push(ne(matches.status, "applied"));
   if (opts.excludeBaseline) conditions.push(eq(matches.isBaseline, false));
   const rows = await db
@@ -75,6 +79,7 @@ export async function getRecentAlertCandidates(since: Date): Promise<Match[]> {
         inArray(matches.level, ["BV", "HIGH", "MEDIUM"]),
         ne(matches.status, "dismissed"),
         eq(matches.isBaseline, false),
+        isNull(matches.closedAt),
       ),
     )
     .orderBy(desc(matches.firstSeen));
@@ -104,20 +109,34 @@ export async function loadPriorIdsBySlug(): Promise<Map<string, Set<string>>> {
   return map;
 }
 
-// Upsert every match from a scan run. New rows get first_seen = last_seen
-// = now (DB defaults). Existing rows (same ats + slug + job_id) refresh
-// last_seen + updated_at + any drifted fields, but the SET clause
-// intentionally omits first_seen + is_baseline — those omissions
-// guarantee the discovery timestamp and the baseline flag stay accurate
-// to when the role was first detected, not the most recent re-scan.
+// Upsert every match from a scan run AND actively close any prior row
+// for a successful slug whose jobId wasn't returned this run. Only
+// successful slugs (those present in `results`) trigger closure —
+// failed-fetch slugs are skipped entirely so a transient ATS outage
+// doesn't auto-close every match for that company.
 //
-// `baselineSlugs` = the set of slugs whose first-ever scan this is. Their
-// rows insert with is_baseline=true so they don't appear as "new" in the
+// New rows get first_seen = last_seen = now (DB defaults). Existing
+// rows (same ats + slug + job_id) refresh last_seen + updated_at +
+// drifted fields AND clear closed_at (a re-appearing job ID means the
+// listing reopened — rare, but happens). The SET clause intentionally
+// omits first_seen + is_baseline so the discovery timestamp and the
+// baseline flag stay accurate to when the role was first detected.
+//
+// `baselineSlugs` = slugs whose first-ever scan this is. Their rows
+// insert with is_baseline=true so they don't appear as "new" in the
 // digest. Rows for slugs already in DB insert with the default (false).
+//
+// After upsert + closure, writes targets.last_success_at = now() for
+// every successful slug. Brand-new targets that haven't yet scanned
+// once read as last_success_at IS NULL, distinguishable from "scanned
+// recently but currently failing."
 export async function persistScanResults(
   results: CompanyResult[],
   baselineSlugs: Set<string>,
 ): Promise<void> {
+  const db = getDb();
+  const successfulSlugs = results.map((r) => r.slug);
+
   const rows = results.flatMap((r) =>
     r.matches.map((m) => ({
       ats: r.ats,
@@ -130,24 +149,63 @@ export async function persistScanResults(
       isBaseline: baselineSlugs.has(r.slug),
     })),
   );
-  if (rows.length === 0) return;
 
-  const db = getDb();
-  await db
-    .insert(matches)
-    .values(rows)
-    .onConflictDoUpdate({
-      target: [matches.ats, matches.companySlug, matches.jobId],
-      set: {
-        lastSeen: sql`now()`,
-        updatedAt: sql`now()`,
-        // level intentionally NOT overwritten on conflict — classifier
-        // rule changes on in-flight rows would require an explicit
-        // reclassify; persistScore is the only thing that updates level
-        // (to the score-derived bucket).
-        title: sql`excluded.title`,
-        location: sql`excluded.location`,
-        companyDisplayName: sql`excluded.company_display_name`,
-      },
-    });
+  if (rows.length > 0) {
+    await db
+      .insert(matches)
+      .values(rows)
+      .onConflictDoUpdate({
+        target: [matches.ats, matches.companySlug, matches.jobId],
+        set: {
+          lastSeen: sql`now()`,
+          updatedAt: sql`now()`,
+          // level intentionally NOT overwritten on conflict — classifier
+          // rule changes on in-flight rows would require an explicit
+          // reclassify; persistScore is the only thing that updates level
+          // (to the score-derived bucket).
+          title: sql`excluded.title`,
+          location: sql`excluded.location`,
+          companyDisplayName: sql`excluded.company_display_name`,
+          // Reopen: if a previously-closed job ID reappears, the
+          // listing is back up. Clear the timestamp so the row drops
+          // out of the closed-roles widget and back into /all.
+          closedAt: sql`NULL`,
+        },
+      });
+  }
+
+  // Per-slug closure pass. For each successful slug, mark every
+  // currently-active match (closed_at IS NULL) whose job_id isn't in
+  // the just-scanned set as closed.
+  //
+  // The empty-jobs case (scan succeeded but returned zero jobs) is a
+  // legitimate "company has no postings right now" signal and all
+  // prior open rows for that slug should close. Drizzle's
+  // notInArray() returns FALSE for an empty array (it can't generate
+  // `NOT IN ()`), so we branch: no jobs ⇒ close all active rows; some
+  // jobs ⇒ close rows not in the set.
+  for (const r of results) {
+    const currentJobIds = r.matches.map((m) => m.id);
+    const baseFilter = and(
+      eq(matches.companySlug, r.slug),
+      isNull(matches.closedAt),
+    );
+    const where =
+      currentJobIds.length === 0
+        ? baseFilter
+        : and(baseFilter, notInArray(matches.jobId, currentJobIds));
+    await db
+      .update(matches)
+      .set({ closedAt: sql`now()`, updatedAt: sql`now()` })
+      .where(where);
+  }
+
+  // Stamp last_success_at on every target whose scan succeeded. One
+  // batched UPDATE — cheap even with 130+ slugs.
+  if (successfulSlugs.length > 0) {
+    await db
+      .update(targets)
+      .set({ lastSuccessAt: sql`now()` })
+      .where(inArray(targets.slug, successfulSlugs));
+  }
 }

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { apiUsage, matches } from "@/db/schema";
 import { getTargets } from "@/db/targets";
@@ -64,7 +64,7 @@ export default async function Docs() {
       lastSeen: sql<string | null>`max(${matches.lastSeen})`,
     })
     .from(matches)
-    .where(ne(matches.status, "dismissed"))
+    .where(and(ne(matches.status, "dismissed"), isNull(matches.closedAt)))
     .groupBy(matches.companySlug);
   const slugStats = new Map(perSlug.map((r) => [r.companySlug, r]));
 
@@ -111,14 +111,15 @@ export default async function Docs() {
     .orderBy(desc(apiUsage.calledAt))
     .limit(20);
 
-  // Scanner stats — totals + per-level breakdown.
+  // Scanner stats — totals + per-level breakdown. Closed rows
+  // excluded so "Total open" matches what /all actually displays.
   const totalsRows = await db
     .select({
       total: sql<number>`count(*)::int`,
       scored: sql<number>`count(${matches.fitScore})::int`,
     })
     .from(matches)
-    .where(ne(matches.status, "dismissed"));
+    .where(and(ne(matches.status, "dismissed"), isNull(matches.closedAt)));
   const total = totalsRows[0]?.total ?? 0;
   const scoredCount = totalsRows[0]?.scored ?? 0;
 
@@ -128,7 +129,7 @@ export default async function Docs() {
       count: sql<number>`count(*)::int`,
     })
     .from(matches)
-    .where(ne(matches.status, "dismissed"))
+    .where(and(ne(matches.status, "dismissed"), isNull(matches.closedAt)))
     .groupBy(matches.level);
   const byLevel: Record<Level, number> = { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
   for (const r of byLevelRows) byLevel[r.level as Level] = r.count;

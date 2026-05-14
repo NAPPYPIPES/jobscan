@@ -1,21 +1,127 @@
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { matches } from "@/db/schema";
+import { apiUsage, matches, targets } from "@/db/schema";
 import { jobUrl } from "@/lib/scan/urls";
 import type { Level } from "@/lib/scan/types";
 import TopCompaniesList, {
   type CompanyData,
 } from "../_components/top-companies-list";
 import CompactRow from "../_components/compact-row";
+import { DailySpendChart, type DailySpendRow } from "../docs/daily-spend-chart";
+import {
+  JobsByCompany,
+  JobsByFit,
+  JobsByLevel,
+  type NewRolesByCompany,
+  type NewRolesByFitBand,
+  type NewRolesByLevel,
+} from "./trends";
+import ClosedRoles, { type ClosedRow } from "./closed-roles";
+import ScanFailures, { type FailingTarget } from "./scan-failures";
 
 export const dynamic = "force-dynamic";
+
+// Threshold for "currently failing" target detection. A target whose
+// last_success_at lags the most recent successful scan by more than
+// this is flagged. 90 min = one full hourly cycle missed plus buffer.
+const SCAN_STALE_THRESHOLD_MINUTES = 90;
 
 export default async function Analytics() {
   const db = getDb();
 
-  // Top companies by open roles (excluding dismissed + baseline). The
-  // client component owns the sort + level-filter UI; here we just
-  // assemble the raw per-(slug, level) counts.
+  // ─── Activity (last 72h) — three trend widgets ─────────────────────
+  // Single pass through the 72h slice of matches, bucketed three ways
+  // (level × window, fit-band, company × window). All exclude baseline
+  // + dismissed rows so the numbers represent genuine new signal.
+  const since72hSql = sql`now() - interval '72 hours'`;
+  const since48hSql = sql`now() - interval '48 hours'`;
+  const since24hSql = sql`now() - interval '24 hours'`;
+
+  const byLevelWindowRows = await db
+    .select({
+      level: matches.level,
+      h24: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since24hSql})::int`,
+      h48: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since48hSql})::int`,
+      h72: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since72hSql})::int`,
+    })
+    .from(matches)
+    .where(
+      and(
+        gte(matches.firstSeen, since72hSql),
+        ne(matches.status, "dismissed"),
+        eq(matches.isBaseline, false),
+        isNull(matches.closedAt),
+      ),
+    )
+    .groupBy(matches.level);
+  const newRolesByLevel: NewRolesByLevel = {
+    BV: { h24: 0, h48: 0, h72: 0 },
+    HIGH: { h24: 0, h48: 0, h72: 0 },
+    MEDIUM: { h24: 0, h48: 0, h72: 0 },
+    LOW: { h24: 0, h48: 0, h72: 0 },
+  };
+  for (const r of byLevelWindowRows) {
+    newRolesByLevel[r.level as Level] = { h24: r.h24, h48: r.h48, h72: r.h72 };
+  }
+
+  // Fit band query — 24h slice, bucket by fit_score. Uses CASE because
+  // we want a derived label, not the raw numeric value, and the four
+  // bands aren't equal-width so width_bucket() would be awkward.
+  const byFitBandRows = await db.execute(
+    sql`SELECT
+      CASE
+        WHEN fit_score IS NULL THEN 'unscored'
+        WHEN fit_score >= 8.0 THEN 'high'
+        WHEN fit_score >= 6.0 THEN 'good'
+        ELSE 'low'
+      END AS band,
+      count(*)::int AS count
+    FROM matches
+    WHERE first_seen >= now() - interval '24 hours'
+      AND status != 'dismissed'
+      AND is_baseline = false
+      AND closed_at IS NULL
+    GROUP BY band`,
+  );
+  const newRolesByFit: NewRolesByFitBand = {
+    high: 0,
+    good: 0,
+    low: 0,
+    unscored: 0,
+  };
+  for (const r of byFitBandRows.rows as { band: string; count: number }[]) {
+    if (r.band === "high" || r.band === "good" || r.band === "low" || r.band === "unscored") {
+      newRolesByFit[r.band] = r.count;
+    }
+  }
+
+  const byCompanyWindowRows = await db
+    .select({
+      slug: matches.companySlug,
+      name: matches.companyDisplayName,
+      h24: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since24hSql})::int`,
+      h48: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since48hSql})::int`,
+      h72: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since72hSql})::int`,
+    })
+    .from(matches)
+    .where(
+      and(
+        gte(matches.firstSeen, since72hSql),
+        ne(matches.status, "dismissed"),
+        eq(matches.isBaseline, false),
+        isNull(matches.closedAt),
+      ),
+    )
+    .groupBy(matches.companySlug, matches.companyDisplayName);
+  const newRolesByCompany: NewRolesByCompany[] = byCompanyWindowRows.map((r) => ({
+    slug: r.slug,
+    name: r.name,
+    h24: r.h24,
+    h48: r.h48,
+    h72: r.h72,
+  }));
+
+  // ─── Top 10 companies by open roles (existing) ─────────────────────
   const perSlugLevel = await db
     .select({
       slug: matches.companySlug,
@@ -25,10 +131,13 @@ export default async function Analytics() {
     })
     .from(matches)
     .where(
-      and(ne(matches.status, "dismissed"), eq(matches.isBaseline, false)),
+      and(
+        ne(matches.status, "dismissed"),
+        eq(matches.isBaseline, false),
+        isNull(matches.closedAt),
+      ),
     )
     .groupBy(matches.companySlug, matches.companyDisplayName, matches.level);
-
   const companyMap = new Map<string, CompanyData>();
   for (const r of perSlugLevel) {
     let entry = companyMap.get(r.slug);
@@ -44,9 +153,85 @@ export default async function Analytics() {
   }
   const companies = Array.from(companyMap.values());
 
-  // Dismissal reason breakdown. Each matches row's dismiss_reason is
-  // a text[] (multi-select); unnest expands it so a row tagged with
-  // both wrong_level + wrong_location counts under both.
+  // ─── Closed roles + per-target scan failures ───────────────────────
+  // Closed rows are now authoritative (closed_at is set by the scanner
+  // after a successful scan that didn't return a previously-known
+  // job_id). Read them directly — no more lastSeen-lag heuristic.
+  const closedTotalRow = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(matches)
+    .where(
+      and(ne(matches.status, "dismissed"), isNotNull(matches.closedAt)),
+    );
+  const closedTotal = closedTotalRow[0]?.count ?? 0;
+
+  const closedRows = await db
+    .select()
+    .from(matches)
+    .where(
+      and(ne(matches.status, "dismissed"), isNotNull(matches.closedAt)),
+    )
+    .orderBy(desc(matches.closedAt))
+    .limit(25);
+  const closedWithUrls: ClosedRow[] = await Promise.all(
+    closedRows.map(async (m) => ({
+      m,
+      applyUrl: await jobUrl(m.ats, m.companySlug, m.jobId),
+    })),
+  );
+
+  // Failing-scan detection: a target is flagged if its
+  // last_success_at is meaningfully older than the most recent
+  // successful scan across all targets. NULL = never scanned
+  // successfully (brand new) and shows in its own band.
+  const latestSuccessRow = await db
+    .select({ ts: sql<string | null>`max(${targets.lastSuccessAt})` })
+    .from(targets);
+  const latestSuccessIso = latestSuccessRow[0]?.ts ?? null;
+
+  const scanCutoffSql = sql`(SELECT max(${targets.lastSuccessAt}) FROM ${targets}) - interval '${sql.raw(
+    String(SCAN_STALE_THRESHOLD_MINUTES),
+  )} minutes'`;
+  const failingRows = await db
+    .select({
+      slug: targets.slug,
+      displayName: targets.displayName,
+      ats: targets.ats,
+      lastSuccessAt: targets.lastSuccessAt,
+    })
+    .from(targets)
+    .where(
+      or(
+        isNull(targets.lastSuccessAt),
+        sql`${targets.lastSuccessAt} < ${scanCutoffSql}`,
+      ),
+    )
+    .orderBy(asc(targets.lastSuccessAt));
+  const failingTargets: FailingTarget[] = failingRows.map((r) => ({
+    slug: r.slug,
+    displayName: r.displayName,
+    ats: r.ats,
+    lastSuccessIso: r.lastSuccessAt
+      ? new Date(r.lastSuccessAt).toISOString()
+      : null,
+  }));
+
+  // ─── API spend (90 days of daily rows; chart aggregates to weekly client-side) ─
+  const dailySpendRows = await db
+    .select({
+      date: sql<string>`to_char(date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC'), 'YYYY-MM-DD')`,
+      total: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text`,
+    })
+    .from(apiUsage)
+    .where(gte(apiUsage.calledAt, sql`now() - interval '90 days'`))
+    .groupBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`)
+    .orderBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`);
+  const dailySpend: DailySpendRow[] = dailySpendRows.map((r) => ({
+    date: r.date,
+    spendUsd: parseFloat(r.total),
+  }));
+
+  // ─── Dismissals (existing) ─────────────────────────────────────────
   const dismissByReasonRows = await db.execute(
     sql`SELECT unnest(dismiss_reason) AS reason, count(*)::int AS count
         FROM matches
@@ -65,7 +250,6 @@ export default async function Analytics() {
   const noTagCount =
     (noTagRow.rows[0] as { count: number } | undefined)?.count ?? 0;
 
-  // Top 5 dismissed companies + top 10 dismissed titles.
   const topDismissedCompaniesRows = await db.execute(
     sql`SELECT company_display_name AS company, count(*)::int AS count
         FROM matches
@@ -92,9 +276,6 @@ export default async function Analytics() {
     count: number;
   }[];
 
-  // Most-recent 25 dismissals for the inline list. Pre-compute apply
-  // URLs server-side because jobUrl is now async and CompactRow is
-  // server-rendered.
   const recentDismissed = await db
     .select()
     .from(matches)
@@ -119,14 +300,49 @@ export default async function Analytics() {
         </h1>
         <p className="max-w-xl text-[15px] leading-relaxed text-stone-500">
           Aggregates across the current match set. Use these to spot
-          companies worth re-prioritizing and dismissal patterns worth
-          baking into the classifier.
+          companies worth re-prioritizing, dismissal patterns worth baking
+          into the classifier, and roles that have quietly closed.
         </p>
       </div>
+
+      <section className="mb-10">
+        <h2 className="mb-4 text-sm font-semibold tracking-tight text-stone-700">
+          Activity (last 72h)
+        </h2>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <JobsByLevel data={newRolesByLevel} />
+          <JobsByFit data={newRolesByFit} />
+          <div className="lg:col-span-2">
+            <JobsByCompany rows={newRolesByCompany} />
+          </div>
+        </div>
+      </section>
+
+      <section className="mb-10">
+        <ScanFailures
+          latestSuccessIso={latestSuccessIso}
+          targets={failingTargets}
+        />
+      </section>
+
+      <section className="mb-10">
+        <ClosedRoles
+          latestScanIso={latestSuccessIso}
+          rows={closedWithUrls}
+          totalCount={closedTotal}
+        />
+      </section>
 
       <div className="mb-10">
         <TopCompaniesList companies={companies} />
       </div>
+
+      <section className="mb-10">
+        <h2 className="mb-4 text-sm font-semibold tracking-tight text-stone-700">
+          API spend
+        </h2>
+        <DailySpendChart data={dailySpend} />
+      </section>
 
       <section className="mb-10">
         <h2 className="mb-4 text-sm font-semibold tracking-tight text-stone-700">
