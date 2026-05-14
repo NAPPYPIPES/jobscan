@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/", label: "Recent" },
   { href: "/all", label: "All open" },
   { href: "/manual", label: "Manual" },
+  { href: "/analytics", label: "Analytics" },
   { href: "/docs", label: "Docs" },
 ];
 

@@ -7,6 +7,7 @@ import type { Sector } from "@/lib/scan/types";
 import { DEFAULT_RUBRIC } from "@/lib/fit/rubric";
 import type { Level } from "@/lib/scan/types";
 import { DailySpendChart, type DailySpendRow } from "./daily-spend-chart";
+import TargetsTable, { type TargetRow } from "./targets-table";
 
 export const dynamic = "force-dynamic";
 
@@ -177,66 +178,19 @@ export default async function Docs() {
           </code>{" "}
           to add or remove.
         </p>
-        <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <table className="w-full text-sm">
-            <thead className="bg-stone-50 text-[10px] font-medium uppercase tracking-wider text-stone-500">
-              <tr>
-                <th className="px-3 py-2 text-left">Company</th>
-                <th className="px-3 py-2 text-left">ATS</th>
-                <th className="px-3 py-2 text-left">Slug</th>
-                <th className="px-3 py-2 text-left">Sector</th>
-                <th className="px-3 py-2 text-right">Open roles</th>
-                <th className="px-3 py-2 text-left">Last scan</th>
-                <th className="px-3 py-2 text-left">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...targets]
-                .sort((a, b) =>
-                  a.displayName.localeCompare(b.displayName, "en", {
-                    sensitivity: "base",
-                  }),
-                )
-                .map((t) => {
-                  const stats = slugStats.get(t.slug);
-                  const count = stats?.count ?? 0;
-                  const last = stats?.lastSeen ? new Date(stats.lastSeen) : null;
-                  const status = count > 0 ? "Active" : "No roles found";
-                  const sector = sectorForSlug(t.slug);
-                  return (
-                    <tr
-                      key={t.slug}
-                      className="border-t border-stone-100 hover:bg-stone-50"
-                    >
-                      <td className="px-3 py-2 font-medium text-stone-900">
-                        {t.displayName}
-                      </td>
-                      <td className="px-3 py-2 text-stone-600">{ATS_LABEL[t.ats]}</td>
-                      <td className="px-3 py-2 font-mono text-xs text-stone-500">
-                        {t.slug}
-                      </td>
-                      <td className="px-3 py-2 text-stone-600">{sector}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-stone-700">
-                        {count}
-                      </td>
-                      <td className="px-3 py-2 text-stone-500">{shortDate(last)}</td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                            count > 0
-                              ? "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200/70"
-                              : "bg-stone-100 text-stone-500 ring-1 ring-inset ring-stone-200"
-                          }`}
-                        >
-                          {status}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
-        </div>
+        <TargetsTable
+          rows={targets.map((t): TargetRow => {
+            const stats = slugStats.get(t.slug);
+            return {
+              slug: t.slug,
+              ats: t.ats,
+              displayName: t.displayName,
+              sector: sectorForSlug(t.slug),
+              count: stats?.count ?? 0,
+              lastSeenIso: stats?.lastSeen ?? null,
+            };
+          })}
+        />
       </Section>
 
       <Section title="Manual checklist companies">
