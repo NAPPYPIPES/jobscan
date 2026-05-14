@@ -1,0 +1,36 @@
+{
+  "name": "pub-ats-radar",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "scan": "tsx scan.ts",
+    "ingest-resume": "tsx scripts/ingest-resume.ts",
+    "ingest-config": "tsx scripts/ingest-config.ts",
+    "validate-ats": "tsx scripts/validate-ats.ts",
+    "populate-companies": "tsx scripts/populate-company-descriptions.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.1",
+    "@neondatabase/serverless": "^1.1.0",
+    "drizzle-orm": "^0.45.2",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "resend": "^6.12.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "dotenv": "^16.4.5",
+    "drizzle-kit": "^0.31.10",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

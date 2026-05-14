@@ -1,0 +1,4 @@
+{
+  "salesforce": { "host": "wd12", "board": "External_Career_Site" },
+  "adobe":      { "host": "wd5",  "board": "external_experienced" }
+}

@@ -1,0 +1,47 @@
+import { Suspense } from "react";
+import { getActiveMatches } from "@/db/matches";
+import { getTargets } from "@/db/targets";
+import type { Sector } from "@/lib/scan/types";
+import { jobUrl } from "@/lib/scan/urls";
+import MatchesView from "../_components/matches-view";
+
+export const dynamic = "force-dynamic";
+
+export default async function AllOpen() {
+  const [matches, targets] = await Promise.all([
+    getActiveMatches(),
+    getTargets(),
+  ]);
+
+  const sectorBySlug: Record<string, Sector> = Object.fromEntries(
+    targets.map((t) => [t.slug, (t.sector ?? "tech") as Sector]),
+  );
+
+  const enriched = await Promise.all(
+    matches.map(async (m) => ({
+      ...m,
+      applyUrl: await jobUrl(m.ats, m.companySlug, m.jobId),
+    })),
+  );
+
+  return (
+    <main className="mx-auto max-w-4xl px-6 py-12 sm:py-16">
+      <div className="mb-10 flex flex-col gap-2">
+        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">
+          All open
+        </p>
+        <h1 className="text-4xl font-semibold tracking-tight text-stone-900 sm:text-5xl">
+          Every open role
+        </h1>
+        <p className="max-w-xl text-[15px] leading-relaxed text-stone-500">
+          The full set of currently open matches, regardless of when they were
+          first seen. Filter by level to narrow.
+        </p>
+      </div>
+
+      <Suspense fallback={null}>
+        <MatchesView matches={enriched} mode="all" sectorBySlug={sectorBySlug} />
+      </Suspense>
+    </main>
+  );
+}

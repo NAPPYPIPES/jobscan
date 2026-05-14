@@ -1,0 +1,430 @@
+import type { LoadedPersonalKeywords } from "@/db/personal-keywords";
+import type { Level, Sector } from "./types";
+
+// ──────────────────────────────────────────────────────────────────────
+// Pure-function classifier
+// ──────────────────────────────────────────────────────────────────────
+// The classifier takes its personal-vocabulary arg explicitly. Callers
+// fetch keywords once at the top of a scan run via
+// db/personal-keywords.getPersonalKeywords() and thread them down
+// through buildCompanyResult → classifyRole / applyDescriptionShift.
+// Keeping the classifier pure (no module-load DB call, no
+// module-scoped mutable state) means it's easy to test and the
+// "what keywords applied to this scan" data flow is visible at the
+// call site.
+//
+// Generic vocabularies (engineering skips, GTM tokens, finserv non-GTM
+// skips, etc.) stay as in-file constants — they're useful-to-everyone
+// defaults, not personal preferences.
+
+export type ClassifierVocab = LoadedPersonalKeywords;
+
+// ──────────────────────────────────────────────────────────────────────
+// HTML / text helpers
+// ──────────────────────────────────────────────────────────────────────
+
+// HTML → plaintext for description scanning. Greenhouse returns the
+// content field with double-encoded HTML entities (&lt;p&gt; not <p>),
+// so we decode entities first, then strip tags, then decode any
+// nested entities, then collapse whitespace. Lowercased at the end so
+// callers can use case-insensitive substring/regex matching directly.
+export function htmlToText(html: string): string {
+  if (!html) return "";
+  const decode = (s: string) =>
+    s
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n));
+  return decode(decode(html))
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .trim();
+}
+
+// Location filter — applied before the role classifier. Defaults match
+// the original tool's NYC + US-remote scope. Edit these to match your
+// own geographic constraints; same shape works for any metro.
+//
+// Workday's list endpoint returns "N Locations" for multi-location jobs
+// (the actual city list isn't exposed without per-job fetches that
+// would N+1 the scan). We accept those as in-scope so we don't miss
+// senior roles at big tenants.
+//
+// US-remote variants are handled tolerantly — "Remote, US",
+// "Remote United States", "U.S. Remote" etc. all qualify.
+export function isInScope(location: string): boolean {
+  const l = location.toLowerCase().trim();
+  if (l.includes("new york") || l.includes("nyc")) return true;
+  if (l.includes("remote")) {
+    const lNorm = l.replace(/\./g, "");
+    if (lNorm.includes("united states")) return true;
+    if (lNorm.includes("usa")) return true;
+    if (/\bus\b/.test(lNorm)) return true;
+  }
+  if (/^\d+ locations$/.test(l)) return true;
+  return false;
+}
+
+// Classifier-stage location disqualifier. Runs after isInScope (which
+// is broader) to catch state-remote postings ("Remote - California,
+// USA") and intl tags that slip through. NYC and bare US-Remote
+// always qualify and short-circuit before the disqualifier lists run.
+export function isLocationDisqualified(location: string): boolean {
+  const n = location.toLowerCase();
+
+  if (n.includes("new york") || n.includes("nyc") || n.includes("manhattan")) {
+    return false;
+  }
+
+  const US_REMOTE_PATTERNS = [
+    /\bremote\s*-\s*usa?\b/,
+    /\bremote,\s*usa?\b/,
+    /\bremote\s*-\s*united states\b/,
+    /\bremote,\s*united states\b/,
+    /\bus-remote\b/,
+  ];
+  if (US_REMOTE_PATTERNS.some((p) => p.test(n))) return false;
+
+  const SINGLE_STATE_REMOTE = [
+    "remote - california", "remote, california",
+    "remote - texas", "remote, texas",
+    "remote - florida", "remote, florida",
+    "remote - washington", "remote, washington",
+    "remote - colorado", "remote, colorado",
+    "remote - illinois", "remote, illinois",
+    "remote - massachusetts", "remote, massachusetts",
+    "remote - georgia", "remote, georgia",
+  ];
+  for (const p of SINGLE_STATE_REMOTE) {
+    if (n.includes(p)) return true;
+  }
+
+  const NON_NY_CITIES = [
+    "san francisco", "los angeles", "chicago", "austin", "seattle",
+    "boston", "denver", "atlanta", "miami", "portland",
+    "dallas", "houston", "philadelphia", "washington dc",
+  ];
+  if (!n.includes("remote")) {
+    for (const city of NON_NY_CITIES) {
+      if (n.includes(city)) return true;
+    }
+  }
+
+  const INTERNATIONAL_PATTERNS = [
+    "london", "dublin", "amsterdam", "paris", "berlin",
+    "singapore", "tokyo", "hong kong", "sydney", "toronto", "bangalore",
+    "tel aviv",
+  ];
+  if (!n.includes("remote")) {
+    for (const intl of INTERNATIONAL_PATTERNS) {
+      if (n.includes(intl)) return true;
+    }
+  }
+
+  return false;
+}
+
+export function normalizeTitle(title: string): string {
+  let s = title.toLowerCase();
+  s = s.replace(/[^a-z0-9\s]/g, " ");
+  s = s.replace(/\bvice president\b/g, "vp");
+  s = s.replace(/\bchief revenue officer\b/g, "cro");
+  s = s.replace(/\b(of|the|for|and|to|a|an)\b/g, " ");
+  s = s.replace(/\s+/g, " ").trim();
+  return s;
+}
+
+function hasKeyword(normalized: string, keyword: string): boolean {
+  const pattern = keyword.includes(" ") ? `\\b${keyword}` : `\\b${keyword}\\b`;
+  return new RegExp(pattern).test(normalized);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Generic classifier vocabularies (stay in code — useful for any user)
+// ──────────────────────────────────────────────────────────────────────
+
+const SKIP_KEYWORDS = [
+  "sdr", "bdr", "intern", "junior", "associate",
+  "sales development representative", "business development representative",
+];
+
+const ENGINEERING_FUNCTION_SKIPS = [
+  "software engineer", "software developer",
+  "data engineer", "data scientist",
+  "machine learning engineer", "ml engineer",
+  "devops", "site reliability", "sre",
+  "infrastructure engineer", "platform engineer",
+  "security engineer", "cybersecurity",
+  "quantitative", "quant analyst", "quant researcher",
+  "systems engineer", "systems architect",
+  "solutions engineer",
+  "sales engineer",
+  "engineering manager", "director engineering", "director of engineering",
+  "vp engineering", "vp of engineering",
+  "head engineering", "head of engineering",
+  "chief technology",
+  "cto",
+];
+
+const ENGINEERING_EXCEPTIONS = [
+  "value engineering",
+  "business value",
+  "revenue engineer",
+];
+
+function hitsEngineeringSkip(normalized: string): boolean {
+  if (ENGINEERING_EXCEPTIONS.some((p) => hasKeyword(normalized, p))) {
+    return false;
+  }
+  return ENGINEERING_FUNCTION_SKIPS.some((p) => hasKeyword(normalized, p));
+}
+
+const UNIVERSAL_HARD_SKIPS = [
+  "recruiter", "recruiting",
+];
+
+const HIGH_PHRASES = [
+  "vp sales", "vp gtm", "head sales", "head gtm", "head revenue", "cro",
+];
+
+const MEDIUM_PHRASES = [
+  "director sales", "director gtm", "enterprise ae", "strategic account",
+  "gtm strategy", "revenue operations", "sales operations",
+  "revops", "revenue ops",
+  "sales strategy", "customer strategy",
+  "partnerships", "partnership",
+];
+
+const LOW_KEYWORDS = [
+  "sales", "gtm", "revenue",
+  "account executive", "customer success",
+  "partner", "partners",
+];
+
+const SENIORITY_HIGH = ["head", "vp"];
+const SENIORITY_MED = ["director"];
+const GTM_TOKENS = ["sales", "gtm", "revenue"];
+
+// Top-level entry point. Dispatches on sector. Personal vocab
+// (healthcare_skips, bv_phrases) is passed in by the caller — see the
+// run.ts / core.ts call chain.
+export function classifyRole(
+  title: string,
+  sector: Sector,
+  location: string | undefined,
+  vocab: ClassifierVocab,
+): Level | null {
+  const n = normalizeTitle(title);
+  for (const w of UNIVERSAL_HARD_SKIPS) {
+    if (hasKeyword(n, w)) return null;
+  }
+  for (const w of vocab.healthcareSkips) {
+    const np = w.replace(/[^a-z0-9]+/g, " ").trim();
+    if (hasKeyword(n, np)) return null;
+  }
+  if (location && isLocationDisqualified(location)) return null;
+  return sector === "finserv"
+    ? classifyRoleFinserv(title, vocab)
+    : classifyRoleTech(title, vocab);
+}
+
+function classifyRoleTech(title: string, vocab: ClassifierVocab): Level | null {
+  const n = normalizeTitle(title);
+
+  if (hitsEngineeringSkip(n)) return null;
+  for (const w of SKIP_KEYWORDS) {
+    if (hasKeyword(n, w)) return null;
+  }
+
+  const hasGtmToken = GTM_TOKENS.some((t) => hasKeyword(n, t));
+
+  if (vocab.bvPhrases.some((p) => hasKeyword(n, p))) return "BV";
+  if (HIGH_PHRASES.some((p) => hasKeyword(n, p))) return "HIGH";
+  if (hasGtmToken && SENIORITY_HIGH.some((s) => hasKeyword(n, s))) return "HIGH";
+  if (MEDIUM_PHRASES.some((p) => hasKeyword(n, p))) return "MEDIUM";
+  if (hasGtmToken && SENIORITY_MED.some((s) => hasKeyword(n, s))) return "MEDIUM";
+  if (LOW_KEYWORDS.some((w) => hasKeyword(n, w))) return "LOW";
+  return null;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Finserv classifier — separate vocabulary from tech.
+// ──────────────────────────────────────────────────────────────────────
+
+const FINSERV_TECH_SKIPS = [
+  "engineer", "engineering", "developer", "architect",
+  "infrastructure", "software", "technology",
+];
+
+const FINSERV_NONGTM_SKIPS = [
+  "risk",
+  "compliance",
+  "audit", "auditor",
+  "trading", "trader",
+  "underwriting", "underwriter",
+  "actuary", "actuarial",
+  "counsel", "attorney",
+  "regulatory",
+  "branch",
+];
+
+const FINSERV_STANDALONE_SKIPS = [
+  "associate", "analyst",
+  "assistant vp", "avp",
+];
+
+const FINSERV_HIGH_HEAD_DOMAINS = [
+  "sales", "distribution", "business development",
+  "strategic partner", "customer success",
+  "gtm", "client engagement", "advisor",
+];
+
+const FINSERV_HIGH_MD_DOMAINS = [
+  "business development", "sales", "distribution",
+  "strategic partner", "gtm", "customer success",
+  "client engagement", "client strategy",
+];
+
+const FINSERV_MED_DIRECTOR_DOMAINS = [
+  "business development", "sales", "distribution",
+  "strategic partner", "customer success",
+  "gtm", "client engagement", "enterprise solution",
+];
+
+const FINSERV_MED_VP_DOMAINS = [
+  "business development", "strategic partner", "distribution",
+  "customer success", "gtm",
+];
+
+const FINSERV_HIGH_CHIEF_PHRASES = [
+  "chief revenue officer",
+  "chief sales officer",
+  "chief customer officer",
+  "chief commercial officer",
+];
+
+// vocab is currently unused in finserv path — finserv-specific BV
+// phrases aren't supported separately from the tech path's BV match.
+// Signature accepts it so the dispatcher stays clean.
+function classifyRoleFinserv(title: string, _vocab: ClassifierVocab): Level | null {
+  const n = normalizeTitle(title);
+
+  if (hitsEngineeringSkip(n)) return null;
+  for (const w of FINSERV_TECH_SKIPS) {
+    if (hasKeyword(n, w)) return null;
+  }
+  for (const w of FINSERV_NONGTM_SKIPS) {
+    if (hasKeyword(n, w)) return null;
+  }
+  for (const w of FINSERV_STANDALONE_SKIPS) {
+    if (hasKeyword(n, w)) return null;
+  }
+
+  if (FINSERV_HIGH_CHIEF_PHRASES.some((p) => hasKeyword(n, p))) return "HIGH";
+
+  if (
+    hasKeyword(n, "managing director") &&
+    FINSERV_HIGH_MD_DOMAINS.some((d) => hasKeyword(n, d))
+  ) return "HIGH";
+
+  if (
+    hasKeyword(n, "head") &&
+    FINSERV_HIGH_HEAD_DOMAINS.some((d) => hasKeyword(n, d))
+  ) return "HIGH";
+
+  if (hasKeyword(n, "cro")) return "MEDIUM";
+
+  if (hasKeyword(n, "business value")) return "MEDIUM";
+
+  if (
+    hasKeyword(n, "director") &&
+    FINSERV_MED_DIRECTOR_DOMAINS.some((d) => hasKeyword(n, d))
+  ) return "MEDIUM";
+
+  if (
+    hasKeyword(n, "vp") &&
+    FINSERV_MED_VP_DOMAINS.some((d) => hasKeyword(n, d))
+  ) return "MEDIUM";
+
+  if (hasKeyword(n, "managing director")) return "LOW";
+  if (hasKeyword(n, "vp")) return "LOW";
+
+  return null;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Description signal scan
+// ──────────────────────────────────────────────────────────────────────
+
+const POSITIVE_PATTERNS: RegExp[] = [
+  /\bbusiness value\b/,
+  /\bvalue consulting\b/,
+  /\bvalue engineering\b/,
+  /\bc[-\s]?(suite|level)\b/,
+  /\bexecutive selling\b/,
+  /\bboard[-\s]?level\b/,
+  /quota[^.]{0,150}\$\s?\d{1,3}\s?m\b/,
+  /\$\s?\d{1,3}\s?m[^.]{0,150}quota/,
+  /\b(manage|build)\s+(a\s+|the\s+)?team\b/,
+  /\bhire and develop\b/,
+];
+
+const NEGATIVE_PATTERNS: RegExp[] = [
+  /\bentry[-\s]?level\b/,
+  /\b0[-\s]?2\s+years\b/,
+  /\b1[-\s]?3\s+years\b/,
+  /\b(sdr|bdr)\b/,
+  /\bbusiness development representative\b/,
+];
+
+function isSmbWithoutEnterprise(d: string): boolean {
+  const hasSmb = /\b(smb|mid[-\s]?market)\b/.test(d);
+  const hasEnterprise = /\benterprise\b/.test(d);
+  return hasSmb && !hasEnterprise;
+}
+
+const LEVEL_RANK: Record<Level, number> = { BV: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+const RANK_TO_LEVEL: Level[] = ["BV", "HIGH", "MEDIUM", "LOW"];
+
+export function applyDescriptionShift(
+  level: Level,
+  description: string | undefined,
+  sector: Sector,
+  vocab: ClassifierVocab,
+): Level | null {
+  if (!description) return level;
+
+  const positiveCount =
+    POSITIVE_PATTERNS.reduce((n, p) => n + (p.test(description) ? 1 : 0), 0) +
+    (sector === "finserv"
+      ? vocab.finservBonusPositivePatterns.reduce(
+          (n, p) => n + (p.test(description) ? 1 : 0),
+          0,
+        )
+      : 0);
+  const negativeCount =
+    NEGATIVE_PATTERNS.reduce((n, p) => n + (p.test(description) ? 1 : 0), 0)
+    + (isSmbWithoutEnterprise(description) ? 1 : 0);
+  const hardCapped = vocab.hardCapLowPatterns.some((p) => p.test(description));
+
+  if (hardCapped) return "LOW";
+
+  const net = positiveCount - negativeCount;
+  if (net === 0) return level;
+
+  if (net > 0) {
+    if (level === "MEDIUM" && net < 2) return level;
+    if (level === "BV") return level;
+    const newRank = LEVEL_RANK[level] - 1;
+    return RANK_TO_LEVEL[newRank];
+  }
+
+  if (level === "LOW") return null;
+  const newRank = LEVEL_RANK[level] + 1;
+  return RANK_TO_LEVEL[newRank];
+}

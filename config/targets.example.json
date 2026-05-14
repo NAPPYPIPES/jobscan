@@ -1,0 +1,27 @@
+[
+  { "ats": "greenhouse", "slug": "anthropic",   "displayName": "Anthropic",   "sector": "tech",    "stage": "late_stage" },
+  { "ats": "greenhouse", "slug": "stripe",      "displayName": "Stripe",      "sector": "tech",    "stage": "late_stage" },
+  { "ats": "greenhouse", "slug": "databricks",  "displayName": "Databricks",  "sector": "tech",    "stage": "late_stage" },
+  { "ats": "greenhouse", "slug": "hebbia",      "displayName": "Hebbia",      "sector": "tech",    "stage": "growth" },
+  { "ats": "greenhouse", "slug": "gleanwork",   "displayName": "Glean",       "sector": "tech",    "stage": "growth" },
+  { "ats": "greenhouse", "slug": "carta",       "displayName": "Carta",       "sector": "finserv", "stage": "late_stage" },
+  { "ats": "greenhouse", "slug": "affirm",      "displayName": "Affirm",      "sector": "finserv", "stage": "public_enterprise" },
+  { "ats": "greenhouse", "slug": "brex",        "displayName": "Brex",        "sector": "finserv", "stage": "late_stage" },
+  { "ats": "greenhouse", "slug": "lattice",     "displayName": "Lattice",     "sector": "tech",    "stage": "growth" },
+  { "ats": "greenhouse", "slug": "cresta",      "displayName": "Cresta",      "sector": "tech",    "stage": "growth" },
+
+  { "ats": "ashby",      "slug": "notion",      "displayName": "Notion",      "sector": "tech",    "stage": "late_stage" },
+  { "ats": "ashby",      "slug": "openai",      "displayName": "OpenAI",      "sector": "tech",    "stage": "late_stage" },
+  { "ats": "ashby",      "slug": "writer",      "displayName": "Writer",      "sector": "tech",    "stage": "growth" },
+  { "ats": "ashby",      "slug": "ramp",        "displayName": "Ramp",        "sector": "finserv", "stage": "late_stage" },
+  { "ats": "ashby",      "slug": "mercury",     "displayName": "Mercury",     "sector": "finserv", "stage": "late_stage" },
+  { "ats": "ashby",      "slug": "plaid",       "displayName": "Plaid",       "sector": "finserv", "stage": "late_stage" },
+  { "ats": "ashby",      "slug": "sierra",      "displayName": "Sierra",      "sector": "tech",    "stage": "growth" },
+  { "ats": "ashby",      "slug": "decagon",     "displayName": "Decagon",     "sector": "tech",    "stage": "growth" },
+  { "ats": "ashby",      "slug": "huggingface", "displayName": "Hugging Face","sector": "tech",    "stage": "growth" },
+
+  { "ats": "lever",      "slug": "rippling",    "displayName": "Rippling",    "sector": "tech",    "stage": "late_stage" },
+
+  { "ats": "workday",    "slug": "salesforce",  "displayName": "Salesforce",  "sector": "tech",    "stage": "public_enterprise" },
+  { "ats": "workday",    "slug": "adobe",       "displayName": "Adobe",       "sector": "tech",    "stage": "public_enterprise" }
+]

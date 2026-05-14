@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Google",
+    "careersUrl": "https://www.google.com/about/careers/applications/jobs/results/?employment_type=FULL_TIME&jex=DIRECTOR&jex=ADVISOR&location=United%20States&q=sales",
+    "description": "Search AI, Cloud (GCP), enterprise GTM. Filtered to Director+ sales roles, US locations.",
+    "sector": "tech"
+  },
+  {
+    "name": "Meta",
+    "careersUrl": "https://www.metacareers.com/jobs?offices[0]=United%20States&roles[0]=sales-account-management",
+    "description": "Reality Labs, enterprise partnerships, AR/VR. Filtered to US sales/account-management roles.",
+    "sector": "tech"
+  },
+  {
+    "name": "Apple",
+    "careersUrl": "https://jobs.apple.com/en-us/search?team=apple-enterprise-SLDV-AENT&location=united-states-USA",
+    "description": "Apple Enterprise org only — ignore consumer/retail roles. US locations.",
+    "sector": "tech"
+  },
+  {
+    "name": "Microsoft",
+    "careersUrl": "https://jobs.careers.microsoft.com/global/en/search?lc=United%20States&et=Full-Time&exp=Experienced%20professionals&rt=Individual%20Contributor&rt=People%20Manager&q=sales",
+    "description": "Azure, Copilot, enterprise sales and GTM. Filtered to US Senior+/Manager.",
+    "sector": "tech"
+  },
+  {
+    "name": "Amazon (AWS)",
+    "careersUrl": "https://www.amazon.jobs/en/search?base_query=enterprise+sales&loc_query=United+States&business_category[]=amazon-web-services",
+    "description": "AWS only — cloud and AI enterprise sales. Excludes retail Amazon.",
+    "sector": "tech"
+  },
+  {
+    "name": "JPMorgan Chase",
+    "careersUrl": "https://careers.jpmorgan.com/us/en/jobs?search=technology+strategy&location=United+States&jobsRadius=50",
+    "description": "Technology strategy, BD, digital transformation — not retail banking.",
+    "sector": "finserv"
+  }
+]

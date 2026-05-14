@@ -1,0 +1,55 @@
+name: Hourly scan + score + daily digest
+
+# Vercel Hobby caps Vercel Cron at once-per-day. To run hourly we
+# trigger our scan and score routes from GitHub Actions instead. The
+# daily digest runs once a day at a fixed time.
+#
+# Required repository secrets:
+#   SITE_URL      — your deployed Vercel URL (no trailing slash)
+#   CRON_SECRET   — same value you set in Vercel env
+
+on:
+  schedule:
+    # Hourly at :05 — gives Vercel a few seconds headroom for the
+    # cron tick to align cleanly with the hour boundary.
+    - cron: "5 * * * *"
+    # Daily digest at 00:15 UTC. Adjust to whatever time you want to
+    # receive the email — UTC.
+    - cron: "15 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  scan-and-score:
+    if: github.event.schedule == '5 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan target companies
+        run: |
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$SITE_URL/api/cron/scan"
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+
+      - name: Score new BV/HIGH/MEDIUM rows
+        run: |
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$SITE_URL/api/cron/score"
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+
+  daily-digest:
+    if: github.event.schedule == '15 0 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send daily digest email
+        run: |
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$SITE_URL/api/cron/digest"
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}

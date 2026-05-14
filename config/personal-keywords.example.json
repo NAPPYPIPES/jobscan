@@ -1,0 +1,23 @@
+{
+  "_comment": "Personal classifier overrides. Anyone forking this repo can override any of these arrays by creating a config/personal-keywords.json (gitignored) sibling. The committed example here is intentionally light — small healthcare list, common BV phrases, no opinionated hard caps.",
+
+  "bv_phrases": [
+    "business value",
+    "value engineering",
+    "value consulting"
+  ],
+
+  "healthcare_skips": [
+    "healthcare",
+    "health care",
+    "health-care",
+    "medical",
+    "pharma",
+    "pharmaceutical",
+    "biotech"
+  ],
+
+  "hard_cap_low_patterns": [],
+
+  "finserv_bonus_positive_patterns": []
+}
