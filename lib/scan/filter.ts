@@ -363,8 +363,7 @@ function classifyRoleFinserv(title: string, _vocab: ClassifierVocab): Level | nu
 
 const POSITIVE_PATTERNS: RegExp[] = [
   /\bbusiness value\b/,
-  /\bvalue consulting\b/,
-  /\bvalue engineering\b/,
+  /\bvalue\s+(engineer|consult|architect|advis|strateg|realiz|transform|manag|creat|acceler|servic|sell|deliver|enable|propos|narrativ)/,
   /\bc[-\s]?(suite|level)\b/,
   /\bexecutive selling\b/,
   /\bboard[-\s]?level\b/,
