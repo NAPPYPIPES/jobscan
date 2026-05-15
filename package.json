@@ -10,7 +10,9 @@
     "ingest-resume": "tsx scripts/ingest-resume.ts",
     "ingest-config": "tsx scripts/ingest-config.ts",
     "validate-ats": "tsx scripts/validate-ats.ts",
-    "populate-companies": "tsx scripts/populate-company-descriptions.ts"
+    "populate-companies": "tsx scripts/populate-company-descriptions.ts",
+    "migrate-rescore": "tsx scripts/migrate-rescore.ts",
+    "apply-migration-0002": "tsx scripts/apply-migration-0002.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

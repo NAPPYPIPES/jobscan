@@ -27,6 +27,17 @@ export async function getUserProfile(): Promise<UserProfile | null> {
   return cached;
 }
 
+// Return the raw resume markdown (full text — same content as
+// docs/resume.md at ingestion time), or null if no profile is loaded.
+// Used by the two-tier scoring prompts which interpolate the full
+// resume into the system block (cached via Anthropic prompt-caching).
+// Hits the same module cache as getUserProfile() so successive calls
+// are sub-ms.
+export async function getRawResume(): Promise<string | null> {
+  const profile = await getUserProfile();
+  return profile?.rawResumeMd ?? null;
+}
+
 // Replace the single profile row. Used by scripts/ingest-resume.ts.
 // Deletes any existing rows first so we always have exactly one row
 // representing the most recent ingestion — no version history needed.

@@ -7,6 +7,8 @@ import { scanGreenhouseCompany } from "./adapters/greenhouse";
 import { scanLeverCompany } from "./adapters/lever";
 import { scanWorkdayCompany } from "./adapters/workday";
 import { LEVEL_LABEL, type CompanyResult, type Level, type Target } from "./types";
+import { getScoringCaps } from "@/db/scoring-caps";
+import { countNewJobsToday, countNewJobsTodayForCompany } from "./dayCaps";
 
 export type RunSummary = {
   timestamp: string;
@@ -36,6 +38,87 @@ function emptySummary(timestamp: string): RunSummary {
     totals: { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 },
     results: [],
   };
+}
+
+// Apply per-day caps to a results array IN PLACE. Mutates result.matches
+// for each company to drop net-new arrivals beyond available headroom.
+// Logs one line per affected company so the scan output makes truncation
+// visible. No DB writes here — pure filter on the result list before
+// persistScanResults consumes it.
+async function applyPerDayCaps(
+  results: CompanyResult[],
+  baselineSlugs: Set<string>,
+): Promise<void> {
+  const caps = await getScoringCaps();
+  const globalCap = caps.perDayCaps.maxNewJobsPerDay;
+  const companyCap = caps.perDayCaps.maxNewJobsPerCompanyPerDay;
+  const todayGlobal = await countNewJobsToday();
+  let globalRemaining = Math.max(0, globalCap - todayGlobal);
+
+  if (todayGlobal >= globalCap) {
+    // Hard short-circuit: cap already hit across the day, so drop every
+    // net-new arrival on this run. Existing-row updates still pass.
+    let totalDropped = 0;
+    for (const r of results) {
+      if (baselineSlugs.has(r.slug)) continue;
+      const before = r.matches.length;
+      r.matches = r.matches.filter((m) => !m.isNew);
+      totalDropped += before - r.matches.length;
+    }
+    if (totalDropped > 0) {
+      console.warn(
+        `[scan] global per-day cap reached (${todayGlobal}/${globalCap}) — dropped ${totalDropped} net-new arrivals across all companies`,
+      );
+    }
+    return;
+  }
+
+  for (const r of results) {
+    if (baselineSlugs.has(r.slug)) continue; // bulk-import slug, exempt
+    const newRoles = r.matches.filter((m) => m.isNew);
+    if (newRoles.length === 0) continue;
+
+    const todayForCo = await countNewJobsTodayForCompany(r.slug);
+    const companyRemaining = Math.max(0, companyCap - todayForCo);
+    const headroom = Math.min(globalRemaining, companyRemaining);
+
+    if (newRoles.length <= headroom) {
+      globalRemaining -= newRoles.length;
+      continue;
+    }
+
+    // Truncate: keep the first `headroom` new roles (any deterministic
+    // order is fine — they're all from the same scan so ordering is
+    // the adapter's natural emission order), drop the rest, log the
+    // delta.
+    const dropped = newRoles.length - headroom;
+    const keepNewIds = new Set(newRoles.slice(0, headroom).map((m) => m.id));
+    r.matches = r.matches.filter((m) => !m.isNew || keepNewIds.has(m.id));
+    globalRemaining -= headroom;
+
+    console.warn(
+      `[scan] ${r.slug}: ${newRoles.length} net-new, dropped ${dropped} ` +
+        `(global=${todayGlobal}/${globalCap}, company=${todayForCo}/${companyCap})`,
+    );
+
+    if (globalRemaining <= 0) {
+      // Hit global cap mid-loop — drop net-new from every remaining
+      // result. Existing-row updates still pass through.
+      let totalDropped = 0;
+      for (const remaining of results.slice(results.indexOf(r) + 1)) {
+        if (baselineSlugs.has(remaining.slug)) continue;
+        const before = remaining.matches.length;
+        remaining.matches = remaining.matches.filter((m) => !m.isNew);
+        totalDropped += before - remaining.matches.length;
+      }
+      if (totalDropped > 0) {
+        console.warn(
+          `[scan] global per-day cap exhausted — dropped ${totalDropped} additional net-new arrivals from remaining companies`,
+        );
+      }
+      return;
+    }
+  }
 }
 
 // Single-company scan with per-ATS dispatch. Returns null on fetch
@@ -151,6 +234,15 @@ export async function runScanAndPersist(): Promise<RunSummary> {
   const baselineSlugs = new Set(
     TARGETS.map((t) => t.slug).filter((s) => !priorBySlug.has(s)),
   );
+
+  // Per-day volume caps. Truncates net-new arrivals (m.isNew && not
+  // baseline) so a chatty Greenhouse can't burn the entire daily quota
+  // on one slug, and the global ceiling rate-limits new-arrival inserts.
+  // Existing-row updates (lastSeen, etc.) pass through untouched.
+  // Baseline rows pass through untouched — first-scan-of-a-company is
+  // intentional bulk import, not net-new discovery.
+  await applyPerDayCaps(results, baselineSlugs);
+
   await persistScanResults(results, baselineSlugs);
 
   return {

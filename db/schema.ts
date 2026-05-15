@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, timestamp, unique, boolean, integer, numeric, index, date, jsonb } from "drizzle-orm/pg-core";
 import type { Ats, CompanyStage, Level, Sector } from "@/lib/scan/types";
+import type { ScoringCaps } from "@/lib/config/scoring-caps-types";
 
 // Ats and Level live in lib/scan/types.ts — the scan domain is the source
 // of truth for those concepts; the DB just persists them. Values are
@@ -66,6 +67,21 @@ export const matches = pgTable(
     fitScore: numeric("fit_score", { precision: 3, scale: 1 }),
     fitSummary: text("fit_summary"),
     fitFlag: text("fit_flag"),
+    // Tier-1 (Haiku triage) fields. Populated on every new desc-capable
+    // role before Tier-2 escalation is decided. Persist independently
+    // from fit_score so a role can have Tier-1 results without Tier-2.
+    tier1Score: numeric("tier1_score", { precision: 3, scale: 1 }),
+    tier1Confidence: text("tier1_confidence"),
+    tier1IsPotentialBv: boolean("tier1_is_potential_bv"),
+    tier1QuickTake: text("tier1_quick_take"),
+    // Set true when Tier-1 flagged is_potential_bv=true but Sonnet cap
+    // was hit, so Tier-2 verification was deferred. Row persists as HIGH
+    // until the next cron tick picks it up for retroactive Tier-2.
+    pendingBvVerification: boolean("pending_bv_verification").notNull().default(false),
+    // Sonnet's one-sentence justification for level_recommendation = BV.
+    // Required when Sonnet assigns BV; null otherwise. Lets you audit
+    // every BV assignment for the title-pattern + seniority signal.
+    bvReasoning: text("bv_reasoning"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -83,7 +99,17 @@ export type NewMatch = typeof matches.$inferInsert;
 // against the soft / hard monthly spend caps.
 // `purpose` distinguishes fit-scoring calls from on-demand pro/con
 // summary calls so /docs can break the spend ledger out by purpose.
-export type ApiUsagePurpose = "score" | "summary";
+//   - "triage":              Tier-1 Haiku call on every new role
+//   - "score":               Tier-2 Sonnet deep-scoring on escalated roles
+//   - "summary":             on-demand Pro/Con summary (Haiku)
+//   - "company_description": one-off Claude call when seeding companies
+//   - "resume_parse":        one-off Haiku call when ingesting resume
+export type ApiUsagePurpose =
+  | "triage"
+  | "score"
+  | "summary"
+  | "company_description"
+  | "resume_parse";
 
 export const apiUsage = pgTable(
   "api_usage",
@@ -271,3 +297,18 @@ export const personalKeywords = pgTable("personal_keywords", {
 
 export type PersonalKeywordsRow = typeof personalKeywords.$inferSelect;
 export type NewPersonalKeywordsRow = typeof personalKeywords.$inferInsert;
+
+// Cost-control caps for the two-tier scoring funnel. Single-row table
+// (key='default' for the single-user case, matching user_profile's
+// pattern). Stored as JSONB so adding a knob doesn't require a
+// schema migration. Type defined in lib/config/scoring-caps-types.ts;
+// db/scoring-caps.ts wraps this with cached getter + replacer + the
+// validation function that runs before each write.
+export const scoringCaps = pgTable("scoring_caps", {
+  key: text("key").primaryKey().default("default"),
+  config: jsonb("config").$type<ScoringCaps>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type ScoringCapsRow = typeof scoringCaps.$inferSelect;
+export type NewScoringCapsRow = typeof scoringCaps.$inferInsert;

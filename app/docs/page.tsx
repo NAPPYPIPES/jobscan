@@ -10,6 +10,9 @@ import { DEFAULT_RUBRIC } from "@/lib/fit/rubric";
 import type { Level } from "@/lib/scan/types";
 import { DailySpendChart, type DailySpendRow } from "./daily-spend-chart";
 import TargetsTable, { type TargetRow } from "./targets-table";
+import { ScoringCapsEditor } from "./scoring-caps-editor";
+import { getScoringCaps } from "@/db/scoring-caps";
+import { checkSpend } from "@/lib/fit/spendCaps";
 
 export const dynamic = "force-dynamic";
 
@@ -49,13 +52,24 @@ export default async function Docs() {
     ? [inArray(matches.companySlug, DEMO_SLUGS_ARRAY as string[])]
     : [];
 
-  // Pre-fetch targets + manual list from DB. Both cached in their
-  // respective db/* modules so this is sub-ms on warm requests.
-  // Demo viewers see the curated targets subset; manual list is the
-  // same for both (it's already a small curated list).
-  const [targets, manualCompanies] = await Promise.all([
+  // Pre-fetch targets + manual list + scoring caps + spend status from
+  // DB. All cached in their respective db/* modules so this is sub-ms
+  // on warm requests. Demo viewers see the curated targets subset;
+  // manual list is the same for both. Caps are read-only for demo.
+  const [
+    targets,
+    manualCompanies,
+    scoringCaps,
+    triageSpend,
+    scoreSpend,
+    summarySpend,
+  ] = await Promise.all([
     getTargets({ role: viewerRole }),
     getManualCompanies(),
+    getScoringCaps(),
+    checkSpend("triage"),
+    checkSpend("score"),
+    checkSpend("summary"),
   ]);
   // Inline sector helper using the fetched rows — avoids touching the
   // db/targets module-level helper which would do a separate (cached)
@@ -454,6 +468,36 @@ export default async function Docs() {
           </span>
           .
         </p>
+      </Section>
+
+      <Section title="Scoring caps">
+        <p className="mb-4 text-sm text-fg-muted">
+          Per-day volume caps and monthly spend caps for the two-tier
+          (Haiku → Sonnet) scoring funnel. Changes apply on the next
+          scan tick. Spend resets at UTC month start.
+        </p>
+        <ScoringCapsEditor
+          initial={scoringCaps}
+          spend={{
+            triage: {
+              spent: triageSpend.spent,
+              cap: scoringCaps.monthlyCapsUsd.triage,
+            },
+            score: {
+              spent: scoreSpend.spent,
+              cap: scoringCaps.monthlyCapsUsd.score,
+            },
+            summary: {
+              spent: summarySpend.spent,
+              cap: scoringCaps.monthlyCapsUsd.summary,
+            },
+            total: {
+              spent: triageSpend.totalSpent,
+              cap: scoringCaps.monthlyCapsUsd.total,
+            },
+          }}
+          readOnly={isDemo}
+        />
       </Section>
     </main>
   );

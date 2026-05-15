@@ -173,6 +173,52 @@ The anchors are written in user-agnostic terms — they reference your
 generally don't need to edit them unless you want to change what
 each numeric score means.
 
+## 9b. (Optional) Tune the scoring caps
+
+The two-tier AI funnel's cost controls live in `config/scoring-caps.json`
+(gitignored) and the `scoring_caps` DB table. Defaults: $40/month total
+hard cap, $5 triage / $35 score / $5 summary by purpose, 100 new
+jobs/day with a 25/company sub-cap, and Tier-1 → Tier-2 escalation at
+score ≥ 7.0 (any confidence), ≥ 5.5 (high confidence), or ≥ 6.5 (medium
+confidence).
+
+To customize before first deploy:
+
+```bash
+cp config/scoring-caps.example.json config/scoring-caps.json
+$EDITOR config/scoring-caps.json
+npm run ingest-config -- scoring-caps
+```
+
+Or just edit them live from the `/docs` Settings section after you're
+running — saves to DB, next scan tick picks up the new values, no
+redeploy needed.
+
+## 9c. Upgrading from an earlier internal version
+
+If you're upgrading a DB from before the two-tier funnel landed, apply
+the additive migration to add the Tier-1 columns and the `scoring_caps`
+table:
+
+```bash
+npm run apply-migration-0002
+```
+
+Idempotent — safe to re-run. After applying, seed the caps with
+`npm run ingest-config -- scoring-caps` (or skip and let the in-code
+`FALLBACK_CAPS` defaults take effect).
+
+To re-score the existing backlog under the new rules (estimated
+~$3.50 for ~475 rows), see `scripts/migrate-rescore.ts`:
+
+```bash
+npm run migrate-rescore -- --dry-run --limit 5   # preview
+npm run migrate-rescore -- --limit 5             # test on 5 rows
+npm run migrate-rescore                          # full backlog
+```
+
+The script has a $5 cost circuit-breaker; pass `--force` to bypass.
+
 ## 10. Run locally
 
 ```bash

@@ -49,10 +49,11 @@ Three categories of data, each handled differently.
 - `manual_companies` — daily checklist (from `config/manual-companies.json`)
 - `workday_tenants` — per-tenant Workday config (from `config/workday-tenants.json`)
 - `personal_keywords` — classifier overrides (from `config/personal-keywords.json`)
-- `user_profile` — parsed resume (from `docs/resume.md` via `npm run ingest-resume`)
-- `matches` — scan results, applied/dismissed state
+- `scoring_caps` — cost-control caps for the two-tier AI funnel (from `config/scoring-caps.json`; also editable live from `/docs`)
+- `user_profile` — parsed resume + raw markdown (from `docs/resume.md` via `npm run ingest-resume`)
+- `matches` — scan results, applied/dismissed state, Tier-1 fields (`tier1_score`, `tier1_confidence`, `tier1_is_potential_bv`, `tier1_quick_take`), Sonnet's `bv_reasoning`, `pending_bv_verification` flag
 - `companies` — one-sentence Claude-generated descriptions
-- `api_usage` — cost ledger
+- `api_usage` — cost ledger (`purpose` distinguishes `triage`/`score`/`summary`/`company_description`/`resume_parse`)
 - `role_summaries` — cached pro/con analyses
 - `manual_checks` — daily-checklist click history
 

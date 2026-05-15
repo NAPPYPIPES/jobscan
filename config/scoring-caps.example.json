@@ -1,0 +1,24 @@
+{
+  "_doc": "Cost-control caps for the two-tier AI scoring funnel. Copy this file to config/scoring-caps.json (gitignored), edit your values, then run `npm run ingest-config` to write to DB. The running app reads only from the scoring_caps DB table — JSON file is ingest seed only.",
+  "perDayCaps": {
+    "maxNewJobsPerDay": 100,
+    "maxNewJobsPerCompanyPerDay": 25
+  },
+  "monthlyCapsUsd": {
+    "triage": 5.0,
+    "score": 35.0,
+    "summary": 5.0,
+    "total": 40.0
+  },
+  "haikuToSonnetThresholds": {
+    "scoreFloorAlways": 7.0,
+    "highConfidenceFloor": 5.5,
+    "mediumConfidenceFloor": 6.5,
+    "forceEscalateOnPotentialBv": true
+  },
+  "behaviorOnCapHit": {
+    "triageCapFallback": "keyword_classifier",
+    "scoreCapFallback": "trust_tier1_max_medium",
+    "totalCapFallback": "hard_stop_all_scoring"
+  }
+}

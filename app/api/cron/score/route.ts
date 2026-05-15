@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { scoreUnscoredEligibleFromDb } from "@/lib/fit/score";
 
-// Decoupled scoring endpoint. Picks up unscored BV/HIGH/MEDIUM rows
-// from the DB and Claude-scores them in small bounded batches —
-// keeps each invocation comfortably under Vercel Hobby's 60s function
-// ceiling. Backlog clears across multiple hourly runs if needed.
+// Decoupled scoring endpoint. Runs the two-tier funnel (Haiku triage
+// then optional Sonnet escalation) on unscored eligible rows, plus the
+// pending-BV-verification auto-pickup. Keeps each invocation under
+// Vercel Hobby's 60s function ceiling.
 //
 // Triggered by the same cron workflow as /api/cron/scan, chained as
 // the second curl step. See .github/workflows/cron.yml.
 export const maxDuration = 60;
 
+// Batch size: each fresh row is up to one Haiku call (~2s) + maybe one
+// Sonnet call (~3-5s). 8 fresh rows worst-case = ~56s — tight against
+// 60s ceiling. In practice ~30% escalate so the average is well under
+// budget. Backlog clears across hourly ticks.
 const BATCH_LIMIT = 8;
 const TIME_BUDGET_MS = 45_000;
 

@@ -22,8 +22,16 @@ import {
 } from "../db/manual-companies";
 import { replaceWorkdayTenants } from "../db/workday-tenants";
 import { replacePersonalKeywords } from "../db/personal-keywords";
+import { replaceScoringCaps } from "../db/scoring-caps";
+import type { ScoringCaps } from "../lib/config/scoring-caps-types";
 
-const KINDS = ["targets", "manual-companies", "workday-tenants", "personal-keywords"] as const;
+const KINDS = [
+  "targets",
+  "manual-companies",
+  "workday-tenants",
+  "personal-keywords",
+  "scoring-caps",
+] as const;
 type Kind = (typeof KINDS)[number];
 
 // For backwards compat with the old filename — the prior layout used
@@ -149,11 +157,33 @@ async function ingestPersonalKeywords() {
   );
 }
 
+async function ingestScoringCaps() {
+  // The example file ships with a `_doc` key for human readers; strip
+  // it before passing to replaceScoringCaps so validateCaps doesn't
+  // see an unknown property. The runtime type only declares the four
+  // known nested objects.
+  const { source, data } = loadJson<ScoringCaps & { _doc?: string }>(
+    "scoring-caps",
+  );
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("scoring-caps config must be a JSON object");
+  }
+  const { _doc: _ignored, ...caps } = data;
+  await replaceScoringCaps(caps as ScoringCaps);
+  console.log(
+    `[scoring-caps] 1 row written (source: ${source}) — ` +
+      `daily=${caps.perDayCaps.maxNewJobsPerDay}, ` +
+      `total=$${caps.monthlyCapsUsd.total.toFixed(0)}, ` +
+      `scoreFloor=${caps.haikuToSonnetThresholds.scoreFloorAlways}`,
+  );
+}
+
 const INGESTORS: Record<Kind, () => Promise<void>> = {
   targets: ingestTargets,
   "manual-companies": ingestManualCompanies,
   "workday-tenants": ingestWorkdayTenants,
   "personal-keywords": ingestPersonalKeywords,
+  "scoring-caps": ingestScoringCaps,
 };
 
 async function main() {

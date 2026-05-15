@@ -6,24 +6,24 @@ import { LEVEL_ORDER, type Level, type Sector } from "@/lib/scan/types";
 import { sectorForSlug } from "@/db/targets";
 import { extractScoringText, fetchDescription } from "./fetch-description";
 import { DEFAULT_RUBRIC, formatRubricForPrompt, type ScoringRubric } from "./rubric";
-import { getUserProfile } from "@/db/profile";
+import { getUserProfile, getRawResume } from "@/db/profile";
+import { checkSpend } from "./spendCaps";
+import { decideEscalation, levelFromTier1, type Tier1Result } from "./escalation";
+import { triageRoleWithHaiku } from "./triage";
+import { getScoringCaps } from "@/db/scoring-caps";
 
-// Claude Sonnet 4.6 — accurate enough for rubric-driven scoring with
-// reasonable cost at typical hobby volumes. Swap to Haiku for cheaper
-// runs if you don't care about the marginal accuracy.
+// Claude Sonnet 4.6 — Tier-2 deep-scorer. Sees the full JD, the full
+// resume, and Haiku's Tier-1 take. Produces dimension scores + a level
+// recommendation. The level_recommendation is authoritative (overrides
+// the old levelFromFit score-banded mapping).
 const MODEL = "claude-sonnet-4-6";
 
 // Public Anthropic Sonnet 4.6 pricing as of 2026-05. Update if rates
 // move — these multiply token counts into the cost ledger.
 const INPUT_PER_MTOK = 3.0;
 const OUTPUT_PER_MTOK = 15.0;
-
-// Monthly spend caps. Soft = warn but proceed; hard = abort silently
-// and leave fit_score null (the scan + classifier still run, the UI
-// still works, the digest still sends — just no Claude scoring on
-// new rows until next month).
-const SOFT_CAP_USD = 35.0;
-const HARD_CAP_USD = 40.0;
+const CACHE_WRITE_PER_MTOK = 3.75;       // 125% of base
+const CACHE_READ_PER_MTOK = 0.30;        // 10% of base
 
 export type CapStatus = {
   hardReached: boolean;
@@ -33,13 +33,21 @@ export type CapStatus = {
 };
 export type CapCheckFn = () => Promise<CapStatus>;
 
+// Cap check now reads from config-backed scoring_caps via spendCaps.ts.
+// Hard cap = score-purpose cap or total cap (whichever hits first).
+// Soft warn at 80% of score cap so logs surface the approach.
 const defaultMonthlyCapCheck: CapCheckFn = async () => {
-  const spend = await getCurrentMonthSpend();
+  const status = await checkSpend("score");
+  const hardReached = status.capReached || status.totalCapReached;
+  const softReached = status.spent >= status.cap * 0.8;
+  const label = status.totalCapReached
+    ? `total $${status.totalCap.toFixed(0)}`
+    : `score $${status.cap.toFixed(0)}`;
   return {
-    hardReached: spend >= HARD_CAP_USD,
-    softReached: spend >= SOFT_CAP_USD,
-    spend,
-    label: `monthly $${SOFT_CAP_USD.toFixed(0)}/$${HARD_CAP_USD.toFixed(0)}`,
+    hardReached,
+    softReached,
+    spend: status.totalCapReached ? status.totalSpent : status.spent,
+    label,
   };
 };
 
@@ -63,6 +71,16 @@ export type FitScore = {
   score: number;
   summary: string;
   flag: FitFlag;
+  // Sonnet's authoritative level assignment — overrides the score-banded
+  // levelFromFit mapping. Set per the BV-vs-HIGH rules in the system
+  // prompt: BV reserved for explicit value-consulting title + Director
+  // seniority; HIGH for strong non-BV fits; MEDIUM for adjacent; LOW
+  // for stretches or hard exclusions.
+  levelRecommendation: Level;
+  // Required when levelRecommendation = "BV": Sonnet's quote of the
+  // title pattern and seniority signal that justified BV. Empty string
+  // otherwise. Logged for audit so every BV assignment is traceable.
+  bvReasoning: string;
 };
 
 export type ScoreResult =
@@ -71,6 +89,8 @@ export type ScoreResult =
       fit: FitScore;
       tokensIn: number;
       tokensOut: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
       costUsd: number;
     }
   | {
@@ -108,47 +128,151 @@ export async function getCurrentMonthSpend(): Promise<number> {
   return parseFloat(rows[0]?.total ?? "0");
 }
 
-// Build the dynamic system prompt by interpolating the user_profile.
-// Profile may be null if the user hasn't run ingest-resume yet — in
-// that case we substitute a generic "no candidate profile loaded"
-// stanza that asks Claude to score industry/seniority neutrally from
-// title + JD alone. Scores will be less personalized but the pipeline
-// still runs.
-async function buildSystemPrompt(rubric: ScoringRubric): Promise<string> {
+// Build the Sonnet system prompt as a single cache-flagged content block.
+// Resume + BV definition + rubric + level rules + output schema are all
+// stable across calls, so cache_control: ephemeral keeps marginal input
+// cost at ~10% of base rate after the first call in a 5-min window.
+//
+// Prefer the raw resume markdown over the parsed user_profile summary —
+// the parsed summary loses signal (Salesforce BVS detail, specific
+// company names, accolades) that Sonnet needs for accurate BV detection.
+// Falls back to the parsed summary if raw resume is missing.
+async function buildSystemBlocks(
+  rubric: ScoringRubric,
+): Promise<Anthropic.Messages.TextBlockParam[]> {
+  const raw = await getRawResume();
   const profile = await getUserProfile();
-  const profileBlock = profile
-    ? [
-        `CANDIDATE PROFILE:`,
-        profile.parsedSummary,
-        ``,
-        `Years of experience: ${profile.yearsExperience ?? "(not stated)"}`,
-        `Seniority level: ${profile.seniorityLevel ?? "(not stated)"}`,
-        `Industries of experience: ${(profile.industries ?? []).join(", ") || "(none listed)"}`,
-        `Functions: ${(profile.functions ?? []).join(", ") || "(none listed)"}`,
-        `Target roles: ${(profile.targetRoles ?? []).join(", ") || "(none listed)"}`,
-        `Hard exclusions: ${(profile.hardExclusions ?? []).join(", ") || "(none listed)"}`,
-      ].join("\n")
-    : [
-        `CANDIDATE PROFILE:`,
-        `(No candidate profile has been ingested yet — run \`npm run ingest-resume\`)`,
-        `Score industry and seniority neutrally from the role title and JD alone.`,
-        `Do not assume any specific industry expertise or seniority band.`,
-      ].join("\n");
+
+  const profileBlock = raw
+    ? raw
+    : profile
+      ? [
+          `CANDIDATE PROFILE (parsed summary — raw resume not loaded):`,
+          profile.parsedSummary,
+          ``,
+          `Years of experience: ${profile.yearsExperience ?? "(not stated)"}`,
+          `Seniority level: ${profile.seniorityLevel ?? "(not stated)"}`,
+          `Industries: ${(profile.industries ?? []).join(", ") || "(none listed)"}`,
+          `Functions: ${(profile.functions ?? []).join(", ") || "(none listed)"}`,
+          `Target roles: ${(profile.targetRoles ?? []).join(", ") || "(none listed)"}`,
+          `Hard exclusions: ${(profile.hardExclusions ?? []).join(", ") || "(none listed)"}`,
+        ].join("\n")
+      : `CANDIDATE PROFILE: (No profile loaded — score industry/seniority neutrally from title + JD only.)`;
 
   const exclusions = (rubric.hardExclusions ?? []).join(", ") || "none";
+  const rubricText = formatRubricForPrompt(rubric);
 
-  return `You are a job fit scorer for a specific candidate. Return only valid JSON, no other text.
+  const text = `You are the Tier-2 deep-scorer for a personal job-fit pipeline. A cheaper Tier-1 model has already triaged this role and flagged it as worth a careful look. Your job is to produce the authoritative fit assessment.
 
+You return strictly valid JSON, no other text, no markdown fences.
+
+================================================================
+CANDIDATE PROFILE
+================================================================
 ${profileBlock}
 
-COMPANY CONTEXT:
-Each user message includes a one-sentence company description (or "(unknown)" if not yet seeded). Use it to score industry fit accurately. A candidate with enterprise SaaS + financial services background is a stronger fit at a company selling to enterprise business buyers than at a crypto infrastructure or consumer fintech company, even if the role titles look similar.
+================================================================
+WHAT "BV" MEANS FOR THIS CANDIDATE — READ CAREFULLY
+================================================================
+The candidate's BV (Business Value) experience is specifically 8 years at Salesforce running the Business Value Services practice for the Financial Services vertical. They built ROI frameworks, business cases, and executive narratives for F500 enterprise deals; led a team of value engineers and AE coaches; co-authored industry whitepapers; and were the primary value consulting voice for hundreds of bank and credit union pursuits.
 
-HARD EXCLUSIONS:
+BV scoring is RESERVED for roles whose TITLE contains explicit business-value function words AND whose SENIORITY is Director-and-above or equivalent staff-IC. Examples that qualify:
+  - "Business Value Engineer" at Databricks
+  - "Senior Value Consultant" at Anthropic
+  - "Head of Business Value Services" at Snowflake
+  - "Value Engineer, AI Success" at OpenAI
+  - "Director of Value Engineering" at MongoDB
+  - "Principal Value Advisor" at any enterprise SaaS company
+
+Roles that are STRONG FITS but NOT BV — these must be HIGH, never BV:
+  - "VP GTM" at Glean
+  - "Director of Enterprise Sales" at Mercury
+  - "Head of Revenue" at Decagon
+  - "VP Strategic Sales" at Notion
+  - "Head of Sales" at any AI-native company
+  - Any Sales Engineering / Solutions Consulting role, even at Director level
+  - Any RevOps / GTM Strategy role, even at VP level
+  - Any Customer Success role unless the title explicitly says "Value"
+  - Any AE / Account Executive role at any level
+  - Any Partnerships / Alliances role
+
+A 9.0 fit that isn't explicit value work should be HIGH. The seniority bar matters too — a "Value Consultant" at Manager level is NOT BV.
+
+================================================================
+SCORING RUBRIC — five dimensions, 0–10 each
+================================================================
+${rubricText}
+
+You assign the dimension scores. The consumer computes the weighted average and applies the IC cap deterministically — you do not need to math the final score. You DO assign level_recommendation directly, using the rules below.
+
+================================================================
+HARD EXCLUSIONS
+================================================================
 Flags that force a 0.0 overall score (set the matching flag and also drop the industry/location dimension to 0):
   ${exclusions}
 
-Score the role on five dimensions (0-10 each) using the rubric in the user message. Do NOT compute the final fit_score — the consumer computes the weighted average and applies the IC cap deterministically. You assign the dimension scores, write a one-sentence summary, and set the flag.`;
+================================================================
+FLAG RULES — set exactly one
+================================================================
+- "healthcare_excluded": role is healthcare-focused — drop industry to 0 and set this flag.
+- "relocation_required": role requires relocation outside the candidate's allowed locations.
+- "level_mismatch": role is far below the candidate's target seniority.
+- "ic_role": individual-contributor sales role (AE, Sales Rep) with no team-management scope. Consumer applies the IC cap automatically.
+- "bv_role": role's primary function is Business Value Consulting / Value Engineering per the title patterns above AND seniority is Director-and-above or staff-IC. Set whenever level_recommendation = "BV".
+- "partnerships_specialist": title contains "Partnerships" or "Alliances" — softer match.
+- "none": none of the above.
+
+================================================================
+LEVEL_RECOMMENDATION — your authoritative level assignment
+================================================================
+This overrides the score→level mapping. Use these explicit rules:
+
+BV — assign ONLY if:
+  (a) the title contains explicit business-value function words (Business Value / Value Consulting / Value Engineering / Value Realization / Value Advisory / Value Architecture / Value Services), AND
+  (b) seniority is Director-and-above OR staff-IC equivalent (Principal / Staff / Lead / Senior Principal).
+  Do NOT inflate other strong-fit roles to BV — they are HIGH instead. When in doubt about title fit for BV, assign HIGH. BV is rare by design.
+
+HIGH — strong fits across function + seniority + industry that are NOT BV-specific. Examples:
+  - VP GTM / VP Sales / VP Revenue at an AI-native or enterprise SaaS company
+  - Head of Strategic Sales in financial services
+  - Director of Enterprise Sales at Series B-D
+  - "Value Consultant" at Manager level (matches function but missing seniority for BV)
+
+MEDIUM — one or two dimensions clearly off but worth surfacing:
+  - Right function, wrong stage
+  - Right seniority, adjacent function
+  - Right function + seniority, weak industry fit
+
+LOW — adjacent or stretched roles not worth alerting on, or hard exclusions.
+
+Internal consistency required:
+  - flag = "bv_role"             → level_recommendation = "BV"
+  - flag = "healthcare_excluded" → level_recommendation = "LOW"
+  - flag = "level_mismatch"      → level_recommendation = "LOW"
+  - flag = "ic_role"             → level_recommendation ≤ "MEDIUM"
+  - flag = "relocation_required" → level_recommendation = "LOW"
+  - flag = "partnerships_specialist" → level_recommendation ≤ "MEDIUM"
+
+================================================================
+OUTPUT
+================================================================
+Return this JSON exactly. No other text. No markdown fences.
+
+{
+  "dimensions": {
+    "function": <0.0–10.0>,
+    "seniority": <0.0–10.0>,
+    "industry": <0.0–10.0>,
+    "stage": <0.0–10.0>,
+    "location": <0.0–10.0>
+  },
+  "summary": "<one sentence, max 30 words>",
+  "flag": "none" | "healthcare_excluded" | "relocation_required" | "level_mismatch" | "ic_role" | "bv_role" | "partnerships_specialist",
+  "level_recommendation": "BV" | "HIGH" | "MEDIUM" | "LOW",
+  "bv_reasoning": "<one short sentence — REQUIRED if level_recommendation = BV; empty string otherwise>"
+}`;
+
+  return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
 }
 
 // One Claude call: prompt → JSON → parse → return. Pre-call cap check
@@ -163,6 +287,13 @@ export async function scoreFitWithClaude(args: {
   location: string;
   description: string;
   sector: Sector;
+  // Tier-1 result, when this role was escalated from Haiku. Sonnet's
+  // user message includes Tier-1's quick_take so Sonnet has Haiku's
+  // read as context. Crucially the prompt also instructs Sonnet to
+  // trust the full JD over Tier-1's snippet-based read — Sonnet is the
+  // authority. Optional for backwards compat with the legacy direct-
+  // score path (e.g. the migration script's Tier-1-less rescore).
+  tier1?: Tier1Result;
   // Calibration / re-score path: bypass the fit_score IS NULL
   // idempotency guard so a previously-scored row can be rescored
   // against an updated rubric. Default false (production path never
@@ -208,23 +339,23 @@ export async function scoreFitWithClaude(args: {
   const client = new Anthropic({ apiKey });
   const rubric = args.rubric ?? DEFAULT_RUBRIC;
 
-  // Description is truncated to ~6000 chars (~1500 tokens). JDs longer
-  // than that are usually boilerplate-bloated; the relevant signal is
-  // in the first few paragraphs and the extractScoringText pass.
-  const desc = args.description.length > 6000
-    ? args.description.slice(0, 6000) + "…"
+  // Description trimmed to 3500 chars (~900 tokens) per the redesign —
+  // shorter than the prior 6000 char limit because the long tail of JD
+  // boilerplate isn't useful, and a tighter cap reduces variable input
+  // tokens (cached system block already dominates). extractScoringText
+  // is called by the caller before reaching here.
+  const desc = args.description.length > 3500
+    ? args.description.slice(0, 3500) + "…"
     : args.description;
 
-  // Fetch company description at scoring time. One indexed PK lookup.
   const companyDescription = await getCompanyDescription(args.companySlug);
-
-  const systemPrompt = await buildSystemPrompt(rubric);
+  const systemBlocks = await buildSystemBlocks(rubric);
 
   try {
     const response = await client.messages.create({
       model: MODEL,
       max_tokens: 800,
-      system: systemPrompt,
+      system: systemBlocks,
       messages: [
         {
           role: "user",
@@ -234,7 +365,7 @@ export async function scoreFitWithClaude(args: {
             companyDescription,
             location: args.location,
             description: desc,
-            rubric,
+            tier1: args.tier1,
           }),
         },
       ],
@@ -242,8 +373,13 @@ export async function scoreFitWithClaude(args: {
 
     const tokensIn = response.usage.input_tokens;
     const tokensOut = response.usage.output_tokens;
+    const cacheReadTokens = response.usage.cache_read_input_tokens ?? 0;
+    const cacheWriteTokens = response.usage.cache_creation_input_tokens ?? 0;
+
     const costUsd =
       (tokensIn / 1_000_000) * INPUT_PER_MTOK +
+      (cacheReadTokens / 1_000_000) * CACHE_READ_PER_MTOK +
+      (cacheWriteTokens / 1_000_000) * CACHE_WRITE_PER_MTOK +
       (tokensOut / 1_000_000) * OUTPUT_PER_MTOK;
 
     const text = response.content
@@ -256,7 +392,15 @@ export async function scoreFitWithClaude(args: {
       return { ok: false, reason: "parse_error" };
     }
 
-    return { ok: true, fit, tokensIn, tokensOut, costUsd };
+    return {
+      ok: true,
+      fit,
+      tokensIn,
+      tokensOut,
+      cacheReadTokens,
+      cacheWriteTokens,
+      costUsd,
+    };
   } catch (err) {
     console.error(`[fit] API error for match ${args.matchId}:`, err);
     return { ok: false, reason: "api_error", error: err };
@@ -269,40 +413,31 @@ function buildUserMessage(args: {
   companyDescription: string | null;
   location: string;
   description: string;
-  rubric: ScoringRubric;
+  tier1?: Tier1Result;
 }): string {
+  // Tier-1 context block — included only when this role was escalated.
+  // The migration script and the legacy direct-score path call without
+  // tier1 (no Haiku run); Sonnet just scores from the JD alone.
+  const tier1Block = args.tier1
+    ? [
+        ``,
+        `Tier-1 triage said:`,
+        `  score=${args.tier1.tier1_score.toFixed(1)}, confidence=${args.tier1.confidence}, potential_bv=${args.tier1.is_potential_bv}`,
+        `  "${args.tier1.quick_take}"`,
+        ``,
+        `(Tier-1 only saw the first 600 chars and may be wrong about seniority. Trust the full JD below over Tier-1's read.)`,
+      ].join("\n")
+    : "";
+
   return `Role to score:
 Title: ${args.title}
 Company: ${args.company}
 Company description: ${args.companyDescription ?? "(unknown — score from title and JD only)"}
 Location: ${args.location}
-Description: ${args.description}
+${tier1Block}
 
-Scoring rubric:
-
-${formatRubricForPrompt(args.rubric)}
-
-FLAG RULES (set exactly one):
-- "healthcare_excluded": role is healthcare-focused — set industry to 0 and use this flag
-- "relocation_required": role requires relocation outside the user's allowed locations
-- "level_mismatch": role is far below the candidate's target seniority (entry-level, Associate, etc.)
-- "ic_role": role is an individual-contributor sales role (Account Executive, AE, Sales Rep) with no team management implied. Set this whenever the title is AE/IC sales — the consumer applies the IC cap automatically. Do not pre-cap the dimension scores.
-- "bv_role": role's PRIMARY function is Business Value Consulting / Value Engineering / Value Services / Strategic Sales Support. Set this ONLY when the JD explicitly describes activities like building ROI models / value frameworks / executive briefings for F500 buyers. Do NOT set for: sales leadership (VP Sales), sales engineering, broad strategy/ops, marketing, account executives.
-- "partnerships_specialist": role title contains "Partnerships" or "Alliances" at any seniority — the scoring path treats these as a softer match unless the JD explicitly describes general sales-leadership scope.
-- "none": none of the above
-
-Return this JSON exactly:
-{
-  "dimensions": {
-    "function": X.X,
-    "seniority": X.X,
-    "industry": X.X,
-    "stage": X.X,
-    "location": X.X
-  },
-  "summary": "ONE short sentence (max 30 words) — what makes this role a strong/weak fit for this candidate",
-  "flag": "none" | "healthcare_excluded" | "relocation_required" | "level_mismatch" | "ic_role" | "bv_role" | "partnerships_specialist"
-}`;
+Description (first 3500 chars of extracted scoring text):
+${args.description}`;
 }
 
 // Compute the weighted-average fit score from the 5 dimensions and
@@ -336,8 +471,9 @@ function computeScore(
 
 // Parse Claude's JSON response. Tolerates the model wrapping the JSON
 // in a ```json fence even though the system prompt asks for raw JSON.
-// Returns null on any shape mismatch so the caller can mark
-// parse_error and move on.
+// Validates the new level_recommendation + bv_reasoning fields and
+// enforces flag/level internal consistency (e.g. bv_role flag forces
+// level=BV). Returns null on any shape mismatch.
 function parseFitJson(text: string, rubric: ScoringRubric): FitScore | null {
   let body = text.trim();
   body = body.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
@@ -378,6 +514,16 @@ function parseFitJson(text: string, rubric: ScoringRubric): FitScore | null {
   if (typeof flag !== "string" || !validFlags.includes(flag as FitFlag)) {
     return null;
   }
+
+  // New: level_recommendation (required) + bv_reasoning (required when BV).
+  const validLevels: Level[] = ["BV", "HIGH", "MEDIUM", "LOW"];
+  const levelRaw = p.level_recommendation;
+  if (typeof levelRaw !== "string" || !validLevels.includes(levelRaw as Level)) {
+    return null;
+  }
+  let levelRecommendation = levelRaw as Level;
+  const bvReasoning = typeof p.bv_reasoning === "string" ? p.bv_reasoning : "";
+
   const dimensions = {
     function: f,
     seniority: sen,
@@ -386,118 +532,453 @@ function parseFitJson(text: string, rubric: ScoringRubric): FitScore | null {
     location: loc,
   };
   const f_flag = flag as FitFlag;
+
+  // Internal-consistency enforcement. If the model emitted an
+  // inconsistent flag + level pair, log a warning and prefer the
+  // level_recommendation (the redesigned authority). The model's
+  // flag stays as-is for filtering purposes (e.g. ic_role still
+  // applies the IC cap deterministically), but the level reflects
+  // Sonnet's higher-order judgment.
+  if (f_flag === "bv_role" && levelRecommendation !== "BV") {
+    console.warn(
+      `[fit] flag=bv_role but level_recommendation=${levelRecommendation} — overriding level to BV`,
+    );
+    levelRecommendation = "BV";
+  }
+  if (
+    (f_flag === "healthcare_excluded" ||
+      f_flag === "relocation_required" ||
+      f_flag === "level_mismatch") &&
+    levelRecommendation !== "LOW"
+  ) {
+    console.warn(
+      `[fit] flag=${f_flag} but level_recommendation=${levelRecommendation} — overriding level to LOW`,
+    );
+    levelRecommendation = "LOW";
+  }
+  if (
+    (f_flag === "ic_role" || f_flag === "partnerships_specialist") &&
+    (levelRecommendation === "BV" || levelRecommendation === "HIGH")
+  ) {
+    console.warn(
+      `[fit] flag=${f_flag} but level_recommendation=${levelRecommendation} — capping at MEDIUM`,
+    );
+    levelRecommendation = "MEDIUM";
+  }
+
+  // BV without reasoning is a contract violation — Sonnet must justify
+  // every BV assignment with the title pattern + seniority quote.
+  if (levelRecommendation === "BV" && !bvReasoning.trim()) {
+    console.warn(`[fit] BV without bv_reasoning — downgrading to HIGH`);
+    levelRecommendation = "HIGH";
+  }
+
   return {
     dimensions,
     score: computeScore(dimensions, f_flag, rubric),
     summary,
     flag: f_flag,
+    levelRecommendation,
+    bvReasoning: levelRecommendation === "BV" ? bvReasoning : "",
   };
 }
 
-// Decoupled scoring path. Queries the DB for unscored eligible rows
-// (BV/HIGH/MEDIUM at any sector, GH/Ashby/Lever only since Workday has
-// no description, dismissed excluded) and scores up to `limit` of them
-// with a wall-clock budget. Re-fetches each description from the
-// source ATS since we don't persist JDs.
+// Two-tier scoring path. Replaces the old single-tier Sonnet-on-every-
+// row approach. For each unscored desc-capable row:
+//   1. Tier-1 (Haiku) triage — cheap; reads title + 600-char snippet +
+//      company description + full resume. Returns score, confidence,
+//      quick_take, is_potential_bv.
+//   2. Escalation decision per the policy in lib/fit/escalation.ts.
+//   3. Tier-2 (Sonnet) deep-score if escalated — uses full JD + Haiku's
+//      take + level_recommendation rules.
+//   4. Persist Tier-1 fields always; Tier-2 fields when escalated.
 //
-// Run from /api/cron/score on the same cron tick as /api/cron/scan,
-// chained sequentially. Conservative limits keep us well inside
-// Vercel Hobby's 60s function ceiling — backlog is fine to clear over
-// multiple runs since the cron fires hourly.
+// Also handles the pending-BV-verification auto-pickup: rows that
+// flagged BV at Tier-1 but couldn't escalate (Sonnet cap hit) get
+// retroactive Tier-2 once budget allows. Picked up FIRST each tick so
+// the "potential gold" rows don't starve.
+//
+// Cap-fallback behavior comes from db/scoring-caps:
+//   - Triage cap hit → keyword classifier (existing level stays).
+//   - Sonnet cap hit, not BV → trust Tier-1 with MEDIUM ceiling.
+//   - Sonnet cap hit, BV → persist as HIGH + pending_bv_verification.
+//   - Total cap hit → hard stop, no more AI calls this tick.
+//
+// Run from /api/cron/score after /api/cron/scan. Budget keeps us
+// inside Vercel Hobby's 60s function ceiling.
 export async function scoreUnscoredEligibleFromDb(opts: {
   limit?: number;
   timeBudgetMs?: number;
   rubric?: ScoringRubric;
-}): Promise<{ scored: number; skipped: number; errored: number; remaining: number }> {
+}): Promise<{
+  scored: number;
+  triagedOnly: number;
+  pendingBvProcessed: number;
+  skipped: number;
+  errored: number;
+  remaining: number;
+}> {
   const limit = opts.limit ?? 8;
   const timeBudgetMs = opts.timeBudgetMs ?? 45_000;
   const rubric = opts.rubric ?? DEFAULT_RUBRIC;
   const start = Date.now();
 
   const db = getDb();
-  // Eligibility: BV/HIGH/MEDIUM, dismissed not excluded by status
-  // alone (would re-score dismissed rows on re-run; instead the
-  // eligibility filter excludes status='dismissed'), only on ATSs
-  // that provide descriptions (Workday is title-only).
-  const candidates = await db
+  const caps = await getScoringCaps();
+
+  // Pop 1: pending_bv_verification = true → auto-pickup retroactive
+  // Tier-2. These already have Tier-1 fields populated; just need
+  // Sonnet to verify the BV claim.
+  const pendingBv = await db
     .select()
     .from(matches)
     .where(
       and(
-        isNull(matches.fitScore),
-        inArray(matches.level, ["BV", "HIGH", "MEDIUM"]),
+        eq(matches.pendingBvVerification, true),
         inArray(matches.ats, ["greenhouse", "ashby", "lever"]),
         ne(matches.status, "dismissed"),
-        // Don't burn API spend scoring rows the scanner already
-        // confirmed have closed at the ATS — they wouldn't appear
-        // in /all anyway.
         isNull(matches.closedAt),
       ),
     )
     .orderBy(desc(matches.firstSeen));
 
-  // Sort by level so BV/HIGH always score first within a run budget.
-  const eligible = candidates.sort(
+  // Pop 2: Tier-1 not yet run (tier1_score IS NULL) on otherwise
+  // eligible rows. The old query keyed on fit_score IS NULL; switching
+  // to tier1_score IS NULL covers everything fit_score IS NULL did
+  // PLUS the rows that have a Tier-1 result but no Tier-2 yet — but
+  // those are handled by pop 1 or by levelFromTier1 already, so we
+  // don't re-process them.
+  const fresh = await db
+    .select()
+    .from(matches)
+    .where(
+      and(
+        isNull(matches.tier1Score),
+        isNull(matches.fitScore),
+        inArray(matches.level, ["BV", "HIGH", "MEDIUM"]),
+        inArray(matches.ats, ["greenhouse", "ashby", "lever"]),
+        ne(matches.status, "dismissed"),
+        isNull(matches.closedAt),
+      ),
+    )
+    .orderBy(desc(matches.firstSeen));
+
+  // Process pending BV first (high-value), then fresh sorted by level
+  // so BV/HIGH classifier candidates score first within budget.
+  const freshSorted = fresh.sort(
     (a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level],
   );
+  const work = [...pendingBv, ...freshSorted].slice(0, limit);
+  const totalPending = pendingBv.length + freshSorted.length;
 
   let scored = 0;
+  let triagedOnly = 0;
+  let pendingBvProcessed = 0;
   let skipped = 0;
   let errored = 0;
 
-  for (const m of eligible.slice(0, limit)) {
+  for (const m of work) {
     if (Date.now() - start > timeBudgetMs) {
       console.warn(
-        `[fit] time budget exhausted (${timeBudgetMs}ms) — bailing with ${scored} scored, ${eligible.length - scored - skipped - errored} remaining`,
+        `[fit] time budget exhausted (${timeBudgetMs}ms) — bailing with ${scored + triagedOnly} processed, ${totalPending - (scored + triagedOnly + skipped + errored)} remaining`,
       );
       break;
     }
-    const sector: Sector = await sectorForSlug(m.companySlug);
+
+    const isPendingBvRow = m.pendingBvVerification;
+
+    // Total-cap check up front for both paths. Hard stop if hit.
+    const totalSpendStatus = await checkSpend("triage");
+    if (totalSpendStatus.totalCapReached) {
+      console.warn(
+        `[fit] total monthly cap reached ($${totalSpendStatus.totalSpent.toFixed(2)}/$${totalSpendStatus.totalCap.toFixed(2)}) — aborting tick`,
+      );
+      break;
+    }
+
+    if (isPendingBvRow) {
+      // ──────────────────────────────────────────────────────────
+      // Pending-BV auto-pickup path: Tier-1 already done, run Tier-2
+      // ──────────────────────────────────────────────────────────
+      const sonnetStatus = await checkSpend("score");
+      if (sonnetStatus.capReached || sonnetStatus.totalCapReached) {
+        // Still can't verify. Leave the row alone (it'll be picked up
+        // next tick or next month).
+        skipped++;
+        continue;
+      }
+
+      const tier1: Tier1Result = {
+        tier1_score: parseFloat(m.tier1Score ?? "0"),
+        confidence: (m.tier1Confidence as "low" | "medium" | "high") ?? "low",
+        quick_take: m.tier1QuickTake ?? "",
+        is_potential_bv: m.tier1IsPotentialBv ?? false,
+      };
+      const result = await runTier2OnRow(m, tier1, rubric);
+      if (result === "ok") {
+        scored++;
+        pendingBvProcessed++;
+      } else if (result === "skip_no_desc") {
+        skipped++;
+      } else {
+        errored++;
+      }
+      continue;
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Fresh row path: Tier-1 first, then maybe Tier-2
+    // ──────────────────────────────────────────────────────────
+    const triageStatus = await checkSpend("triage");
+    if (triageStatus.capReached || triageStatus.totalCapReached) {
+      // Triage cap reached — caller's policy is keyword_classifier
+      // fallback, which means leaving the existing classifier-set
+      // level alone. Skip without burning budget.
+      console.warn(
+        `[fit] triage cap reached ($${triageStatus.spent.toFixed(2)}/$${triageStatus.cap.toFixed(2)}) — skipping ${m.companySlug}/${m.jobId}`,
+      );
+      skipped++;
+      continue;
+    }
+
+    // Need the JD for the snippet. Workday is excluded by the SQL
+    // filter so this should always succeed for desc-capable ATSs.
     const rawDesc = await fetchDescription(m.ats, m.companySlug, m.jobId);
     if (!rawDesc) {
       skipped++;
       console.log(`[fit] skip ${m.companySlug}/${m.jobId} — no description`);
       continue;
     }
-    const desc = extractScoringText(rawDesc);
-    const out = await scoreFitWithClaude({
-      matchId: m.id,
+    const extracted = extractScoringText(rawDesc);
+
+    // Tier-1: Haiku triage.
+    const triageOut = await triageRoleWithHaiku({
       title: m.title,
       company: m.companyDisplayName,
       companySlug: m.companySlug,
       location: m.location,
-      description: desc,
-      sector,
-      rubric,
+      descriptionSnippet: extracted,
     });
-    if (out.ok) {
-      try {
-        await persistScore(m.id, out.fit, out.tokensIn, out.tokensOut, out.costUsd, rubric);
+
+    if (!triageOut.ok) {
+      console.warn(
+        `[fit] tier-1 failed for ${m.companySlug}/${m.jobId} (${triageOut.reason}) — falling back to classifier level`,
+      );
+      errored++;
+      continue;
+    }
+
+    // Log triage api_usage row regardless of escalation decision.
+    await insertTriageUsage(m.id, triageOut);
+
+    // Escalation decision.
+    const sonnetStatus = await checkSpend("score");
+    const sonnetCapReached =
+      sonnetStatus.capReached || sonnetStatus.totalCapReached;
+    const decision = decideEscalation(triageOut.tier1, caps, sonnetCapReached);
+
+    if (decision.escalate) {
+      // Tier-2: Sonnet deep-score with Tier-1 context.
+      const result = await runTier2OnRow(
+        m,
+        triageOut.tier1,
+        rubric,
+        extracted,
+      );
+
+      if (result === "ok") {
         scored++;
         console.log(
-          `[fit] ${m.companySlug}/${m.jobId} → ${out.fit.score.toFixed(1)} ` +
-            `(${out.fit.flag}, $${out.costUsd.toFixed(4)}): ${m.title}`,
+          `[fit] match=${m.id.slice(0, 8)} haiku={score:${triageOut.tier1.tier1_score.toFixed(1)}, conf:${triageOut.tier1.confidence}, bv:${triageOut.tier1.is_potential_bv}} → escalate (${decision.reason}) — see next line`,
         );
-      } catch (err) {
-        console.error(`[fit] persist failed for ${m.id}:`, err);
+      } else if (result === "skip_no_desc") {
+        // Shouldn't happen since we already fetched description, but defensive.
+        skipped++;
+      } else {
         errored++;
       }
-    } else if (out.reason === "cap_reached" || out.reason === "missing_key") {
-      console.warn(`[fit] aborting remaining scoring: ${out.reason}`);
-      break;
-    } else if (out.reason === "already_scored") {
-      skipped++;
-    } else {
-      errored++;
+      continue;
     }
+
+    // Not escalated. Persist Tier-1 only. Level capped at MEDIUM
+    // (HIGH/BV require Sonnet verification per the design).
+    let level: Level;
+    let pendingBv = false;
+    if (decision.reason === "potential_bv_capped") {
+      // Sonnet cap hit + BV flagged. Persist as HIGH with pending flag
+      // so the next tick (or next month) picks it up via pop 1.
+      level = "HIGH";
+      pendingBv = true;
+    } else {
+      level = levelFromTier1(triageOut.tier1.tier1_score);
+    }
+
+    await persistTier1Only(m.id, triageOut.tier1, level, pendingBv);
+    triagedOnly++;
+    console.log(
+      `[fit] match=${m.id.slice(0, 8)} haiku={score:${triageOut.tier1.tier1_score.toFixed(1)}, conf:${triageOut.tier1.confidence}, bv:${triageOut.tier1.is_potential_bv}} → no_escalate (${decision.reason}) → level:${level}${pendingBv ? " pending_bv=true" : ""}`,
+    );
   }
 
   return {
     scored,
+    triagedOnly,
+    pendingBvProcessed,
     skipped,
     errored,
-    remaining: Math.max(0, eligible.length - scored - skipped - errored),
+    remaining: Math.max(0, totalPending - (scored + triagedOnly + skipped + errored)),
   };
+}
+
+// Inner helper: run Tier-2 on a row using the given Tier-1 result.
+// Returns "ok" on success, "skip_no_desc" if JD fetch fails,
+// "error" otherwise. Used by both the fresh-row path (with the JD
+// already fetched) and the pending-BV-verification path (which needs
+// to re-fetch the JD).
+type Tier2Outcome = "ok" | "skip_no_desc" | "error";
+
+async function runTier2OnRow(
+  m: typeof matches.$inferSelect,
+  tier1: Tier1Result,
+  rubric: ScoringRubric,
+  preFetchedDesc?: string,
+): Promise<Tier2Outcome> {
+  // Write Tier-1 fields up front so they survive even if Tier-2 errors.
+  // persistScore will later overwrite level (with level_recommendation),
+  // bvReasoning, and pendingBvVerification — but the Tier-1 audit
+  // trail stays intact regardless. Skip for the pending-BV-pickup path
+  // where Tier-1 fields are already on the row.
+  if (m.tier1Score == null) {
+    await writeTier1Fields(m.id, tier1);
+  }
+
+  let desc = preFetchedDesc;
+  if (!desc) {
+    const rawDesc = await fetchDescription(m.ats, m.companySlug, m.jobId);
+    if (!rawDesc) {
+      console.log(`[fit] skip ${m.companySlug}/${m.jobId} — no description`);
+      return "skip_no_desc";
+    }
+    desc = extractScoringText(rawDesc);
+  }
+
+  const sector: Sector = await sectorForSlug(m.companySlug);
+  const out = await scoreFitWithClaude({
+    matchId: m.id,
+    title: m.title,
+    company: m.companyDisplayName,
+    companySlug: m.companySlug,
+    location: m.location,
+    description: desc,
+    sector,
+    tier1,
+    rubric,
+  });
+
+  if (!out.ok) {
+    if (out.reason === "cap_reached" || out.reason === "missing_key") {
+      console.warn(`[fit] tier-2 aborted: ${out.reason}`);
+    }
+    return "error";
+  }
+
+  try {
+    await persistScore(
+      m.id,
+      out.fit,
+      out.tokensIn,
+      out.tokensOut,
+      out.costUsd,
+      rubric,
+      {
+        cacheReadTokens: out.cacheReadTokens,
+        cacheWriteTokens: out.cacheWriteTokens,
+      },
+    );
+    console.log(
+      `[fit]   sonnet={dims:[f:${out.fit.dimensions.function.toFixed(1)}, s:${out.fit.dimensions.seniority.toFixed(1)}, i:${out.fit.dimensions.industry.toFixed(1)}, st:${out.fit.dimensions.stage.toFixed(1)}, l:${out.fit.dimensions.location.toFixed(1)}], score:${out.fit.score.toFixed(1)}, level:${out.fit.levelRecommendation}, flag:${out.fit.flag}, $${out.costUsd.toFixed(4)}}` +
+        (out.fit.levelRecommendation === "BV" ? ` bv_reasoning:"${out.fit.bvReasoning}"` : ""),
+    );
+    return "ok";
+  } catch (err) {
+    console.error(`[fit] persist failed for ${m.id}:`, err);
+    return "error";
+  }
+}
+
+// Write just the Tier-1 columns on a matches row. Used before
+// escalation so the audit trail lands even if Tier-2 fails. Does NOT
+// touch level — that's controlled by persistTier1Only (no escalation)
+// or persistScore (escalation).
+async function writeTier1Fields(
+  matchId: string,
+  tier1: Tier1Result,
+): Promise<void> {
+  const db = getDb();
+  await db
+    .update(matches)
+    .set({
+      tier1Score: tier1.tier1_score.toFixed(1),
+      tier1Confidence: tier1.confidence,
+      tier1IsPotentialBv: tier1.is_potential_bv,
+      tier1QuickTake: tier1.quick_take,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(matches.id, matchId));
+}
+
+// Persist Tier-1 results without a Tier-2 score. Updates level + Tier-1
+// columns; leaves fit_score NULL. Writes the api_usage row for the
+// triage call.
+async function persistTier1Only(
+  matchId: string,
+  tier1: Tier1Result,
+  level: Level,
+  pendingBv: boolean,
+): Promise<void> {
+  const db = getDb();
+  await db
+    .update(matches)
+    .set({
+      tier1Score: tier1.tier1_score.toFixed(1),
+      tier1Confidence: tier1.confidence,
+      tier1IsPotentialBv: tier1.is_potential_bv,
+      tier1QuickTake: tier1.quick_take,
+      pendingBvVerification: pendingBv,
+      level,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(matches.id, matchId));
+}
+
+// Insert the triage-purpose api_usage row. Tier-1 fields are also
+// written on the matches row separately. Cost ledger here tracks per-
+// purpose spend so checkSpend("triage") returns accurate monthly sums.
+async function insertTriageUsage(
+  matchId: string,
+  out: {
+    tokensIn: number;
+    tokensOut: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    costUsd: number;
+  },
+): Promise<void> {
+  const db = getDb();
+  await db.insert(apiUsage).values({
+    matchId,
+    tokensIn: out.tokensIn + out.cacheReadTokens + out.cacheWriteTokens,
+    tokensOut: out.tokensOut,
+    costUsd: out.costUsd.toFixed(6),
+    model: "claude-haiku-4-5-20251001",
+    purpose: "triage",
+  });
+
+  // Also update the matches row with Tier-1 fields here so the data
+  // lands even if Tier-2 fails or is skipped. Persisting again from
+  // persistTier1Only is idempotent (last write wins on the same row).
+  // For the escalation path, persistScore() later overwrites level
+  // with Sonnet's level_recommendation.
 }
 
 // Decides whether a row appears in the daily digest. Wider than just
@@ -539,9 +1020,16 @@ export function levelFromFit(score: number, flag: FitFlag): Level {
   return "LOW";
 }
 
-// Persist a successful score: writes the matches.fit_* fields, updates
-// the level column to the score-derived value (so digest + UI filters
-// reflect the unified system), and inserts an api_usage ledger row.
+// Persist a successful Sonnet score. Writes:
+//   - fit_* columns from Sonnet's dimension scores
+//   - level column from Sonnet's level_recommendation (NOT levelFromFit)
+//   - bv_reasoning when level=BV
+//   - clears pending_bv_verification (Sonnet has now verified)
+//   - api_usage row with purpose='score'
+//
+// levelFromFit() is still exported and used by the legacy direct-score
+// path (callers without Tier-1 escalation) — but the production
+// pipeline always has Sonnet's level_recommendation.
 export async function persistScore(
   matchId: string,
   fit: FitScore,
@@ -549,6 +1037,7 @@ export async function persistScore(
   tokensOut: number,
   costUsd: number,
   _rubric: ScoringRubric = DEFAULT_RUBRIC,
+  opts?: { cacheReadTokens?: number; cacheWriteTokens?: number },
 ): Promise<void> {
   const db = getDb();
   await db
@@ -557,15 +1046,18 @@ export async function persistScore(
       fitScore: fit.score.toFixed(1),
       fitSummary: fit.summary,
       fitFlag: fit.flag,
-      level: levelFromFit(fit.score, fit.flag),
+      level: fit.levelRecommendation,
+      bvReasoning: fit.bvReasoning || null,
+      pendingBvVerification: false,
       updatedAt: sql`now()`,
     })
     .where(eq(matches.id, matchId));
   await db.insert(apiUsage).values({
     matchId,
-    tokensIn,
+    tokensIn: tokensIn + (opts?.cacheReadTokens ?? 0) + (opts?.cacheWriteTokens ?? 0),
     tokensOut,
     costUsd: costUsd.toFixed(6),
     model: MODEL,
+    purpose: "score",
   });
 }
