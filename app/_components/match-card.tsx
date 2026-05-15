@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { memo, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Match, DismissReason } from "@/db/schema";
 import type { Level } from "@/lib/scan/types";
@@ -84,7 +84,17 @@ function ReasonCheckbox({
   );
 }
 
-export default function MatchCard({
+// Wrapped in React.memo at the bottom of the file. Skips re-render
+// when props are reference-equal, which matters because the parent
+// (MatchesView) re-renders whenever the URL changes (filters, sort,
+// search) — without memo, every keystroke in the search box would
+// re-render every visible MatchCard.
+//
+// onToggleSummary takes the id rather than being pre-bound by the
+// parent. This lets the parent pass a SINGLE stable callback (via
+// useCallback) instead of creating one closure per card per render
+// (which would defeat memo).
+function MatchCardImpl({
   m,
   isSummaryOpen,
   onToggleSummary,
@@ -92,7 +102,7 @@ export default function MatchCard({
 }: {
   m: MatchWithUrl;
   isSummaryOpen: boolean;
-  onToggleSummary: () => void;
+  onToggleSummary: (id: string) => void;
   viewerRole: Role;
 }) {
   const isDemo = viewerRole === "demo";
@@ -330,7 +340,7 @@ export default function MatchCard({
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              onToggleSummary();
+              onToggleSummary(m.id);
             }}
             className="inline-flex h-9 shrink-0 items-center gap-1 rounded px-2 text-[11px] font-medium text-fg-subtle transition-colors hover:bg-muted hover:text-fg sm:h-auto sm:px-1.5 sm:py-1"
           >
@@ -424,6 +434,13 @@ export default function MatchCard({
     </div>
   );
 }
+
+// Default React.memo shallow-compare is enough here: m comes from the
+// parent's matches array (stable reference until the underlying data
+// changes), isSummaryOpen/viewerRole are primitives, and
+// onToggleSummary is now wrapped in useCallback by the parent.
+const MatchCard = memo(MatchCardImpl);
+export default MatchCard;
 
 function SummarySection({
   loading,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Level, Sector } from "@/lib/scan/types";
 import type { Role } from "@/lib/auth/cookie";
@@ -273,9 +273,12 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const [openSummaryId, setOpenSummaryId] = useState<string | null>(null);
-  const onToggleSummary = (matchId: string) => {
+  // Stable across renders so React.memo on MatchCard can actually skip
+  // re-renders. The functional setState lets us avoid depending on
+  // openSummaryId in the deps array.
+  const onToggleSummary = useCallback((matchId: string) => {
     setOpenSummaryId((prev) => (prev === matchId ? null : matchId));
-  };
+  }, []);
 
   const toggleCompany = (slug: string) => {
     setCollapsed((prev) => {
@@ -364,7 +367,7 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
                           <MatchCard
                             m={m}
                             isSummaryOpen={openSummaryId === m.id}
-                            onToggleSummary={() => onToggleSummary(m.id)}
+                            onToggleSummary={onToggleSummary}
                             viewerRole={viewerRole}
                           />
                         </li>

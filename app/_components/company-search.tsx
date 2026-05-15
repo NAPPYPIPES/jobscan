@@ -20,6 +20,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { logoUrl } from "@/lib/scan/logos";
 
+// Debounce window for syncing the local input value up to the parent
+// (and through it, the URL + heavy match-list re-filter). Typing feels
+// instant — the input + dropdown re-render against local state — and
+// the expensive cascade fires once per pause. 150ms is below human
+// perception of lag while still coalescing rapid typing.
+const QUERY_DEBOUNCE_MS = 150;
+
 export type CompanyOption = {
   slug: string;
   displayName: string;
@@ -92,16 +99,49 @@ export default function CompanySearch({
   pinnedCompanyName,
   onClearPinned,
 }: Props) {
+  // Local input state — re-renders only this component on each
+  // keystroke (cheap). The URL + match-list filter is sync'd via the
+  // debounced effect below so the heavy cascade doesn't fire 6+ times
+  // a second while typing.
+  const [localQuery, setLocalQuery] = useState(query);
   const [open, setOpen] = useState(false);
   const [focusIdx, setFocusIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
+  // External query changes (URL nav, parent state reset) win over the
+  // local optimistic value. Sync only when they differ to avoid a
+  // setState loop with the debounced upward-sync effect below.
+  useEffect(() => {
+    setLocalQuery((prev) => (prev === query ? prev : query));
+  }, [query]);
+
+  // Debounced upward sync. Local edits propagate to the parent (and
+  // thus the URL) once the user pauses typing. Selection / clear
+  // bypass this via flushQuery() which fires immediately.
+  useEffect(() => {
+    if (localQuery === query) return;
+    const t = setTimeout(() => {
+      onChangeQuery(localQuery);
+    }, QUERY_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [localQuery, query, onChangeQuery]);
+
+  // Force-flush the debounce — used when committing a selection or
+  // clearing the input. Sends the value up immediately so subsequent
+  // navigation doesn't lag a frame behind the visible state.
+  const flushQuery = (next: string) => {
+    setLocalQuery(next);
+    onChangeQuery(next);
+  };
+
   // Filtered + sorted suggestions. Capped at 8 — anything more swamps
   // the dropdown on mobile and there's no realistic case where the
   // user wants to scroll a list of 80 companies in a typeahead.
+  // Memoized against LOCAL query so the dropdown updates per
+  // keystroke, not per debounce tick.
   const suggestions = useMemo(() => {
-    const q = query.trim();
+    const q = localQuery.trim();
     if (!q) {
       // Empty query: show all companies with at least one role,
       // sorted by count desc (most-active first). Lets the dropdown
@@ -160,7 +200,7 @@ export default function CompanySearch({
       if (pick) {
         e.preventDefault();
         onSelectCompany(pick.slug);
-        onChangeQuery("");
+        flushQuery("");
         setOpen(false);
       }
     } else if (e.key === "Escape") {
@@ -172,9 +212,9 @@ export default function CompanySearch({
     <div ref={containerRef} className="relative">
       <input
         type="text"
-        value={query}
+        value={localQuery}
         onChange={(e) => {
-          onChangeQuery(e.target.value);
+          setLocalQuery(e.target.value);
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
@@ -193,11 +233,11 @@ export default function CompanySearch({
         aria-autocomplete="list"
         role="combobox"
       />
-      {query && (
+      {localQuery && (
         <button
           type="button"
           onClick={() => {
-            onChangeQuery("");
+            flushQuery("");
             setOpen(false);
           }}
           aria-label="Clear search"
@@ -228,7 +268,7 @@ export default function CompanySearch({
                   // mid-tap on mobile.
                   e.preventDefault();
                   onSelectCompany(s.slug);
-                  onChangeQuery("");
+                  flushQuery("");
                   setOpen(false);
                 }}
                 className={`flex cursor-pointer items-center gap-3 px-3 py-3 text-sm transition-colors ${
