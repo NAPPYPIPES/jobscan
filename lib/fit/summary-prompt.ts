@@ -58,12 +58,20 @@ export async function generateSummary(args: {
   const userMessage = buildUserMessage(args);
 
   let lastParseText = "";
+  let lastStopReason: string | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     let response: Anthropic.Message;
     try {
       response = await client.messages.create({
         model: MODEL,
-        max_tokens: 400,
+        // 800 because 400 was getting truncated mid-JSON for richer
+        // prompts (longer JDs + the BV-calibrated resume produce
+        // longer pros/cons arrays). At Haiku 4.5 output rates
+        // ($5/MTok) the extra headroom costs <$0.002 per call. The
+        // prompt asks for a short summary + 2-3 bullets each side, so
+        // 800 is plenty — anything materially longer means Haiku is
+        // ignoring the length cap, not that we should keep raising it.
+        max_tokens: 800,
         temperature: 0.3,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userMessage }],
@@ -88,8 +96,18 @@ export async function generateSummary(args: {
       return { ok: true, result: parsed, tokensIn, tokensOut, costUsd };
     }
     lastParseText = text;
+    lastStopReason = response.stop_reason;
+    // Truncation is the load-bearing failure mode — surface it
+    // explicitly in the log so a parse error from a real JSON shape
+    // problem is distinguishable from a too-small token budget.
+    const tag = response.stop_reason === "max_tokens" ? " [TRUNCATED]" : "";
     console.warn(
-      `[summary] parse failed (attempt ${attempt + 1}): ${text.slice(0, 200)}`,
+      `[summary] parse failed (attempt ${attempt + 1})${tag}: ${text.slice(0, 200)}`,
+    );
+  }
+  if (lastStopReason === "max_tokens") {
+    console.error(
+      `[summary] giving up: response exceeded max_tokens budget. Bump max_tokens in summary-prompt.ts.`,
     );
   }
 
