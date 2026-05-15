@@ -142,17 +142,18 @@ async function main(): Promise<void> {
   for (let i = 0; i < limited.length; i++) {
     const m = limited[i]!;
 
-    // Cost circuit-breaker every 25 rows. Aborts if cumulative spend
-    // exceeds the soft budget — gives the caller a chance to inspect
-    // before continuing with --force.
-    if (i > 0 && i % 25 === 0 && !args.force) {
-      if (runSpend >= COST_CIRCUIT_BREAKER_USD) {
+    // Progress log every 25 rows. Always fires so --force runs still
+    // surface live progress over a 10-15 min run. Cost circuit-breaker
+    // is the conditional part — only active without --force, since
+    // --force is the explicit "I know what I'm doing" override.
+    if (i > 0 && i % 25 === 0) {
+      console.log(`[migrate] progress: ${i}/${limited.length}, spent $${runSpend.toFixed(2)}`);
+      if (!args.force && runSpend >= COST_CIRCUIT_BREAKER_USD) {
         console.warn(
           `[migrate] cost circuit-breaker tripped at $${runSpend.toFixed(2)} (limit: $${COST_CIRCUIT_BREAKER_USD.toFixed(2)}). Re-run with --force to continue.`,
         );
         break;
       }
-      console.log(`[migrate] progress: ${i}/${limited.length}, spent $${runSpend.toFixed(2)}`);
     }
 
     const rawDesc = await fetchDescription(m.ats, m.companySlug, m.jobId);

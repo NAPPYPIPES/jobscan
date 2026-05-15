@@ -215,8 +215,12 @@ Flags that force a 0.0 overall score (set the matching flag and also drop the in
 FLAG RULES — set exactly one
 ================================================================
 - "healthcare_excluded": role is healthcare-focused — drop industry to 0 and set this flag.
-- "relocation_required": role requires relocation outside the candidate's allowed locations.
-- "level_mismatch": role is far below the candidate's target seniority.
+- "relocation_required": role is NOT in NYC, NYC metro (Westchester, Long Island, Northern NJ commute corridor, southern CT), OR US-remote. Set this whenever:
+    (a) The location field names a non-NYC US city (SF, LA, Austin, Boston, Chicago, Seattle, Denver, Atlanta, Dallas, Miami, DC-only, Portland, etc.) without a remote / NYC-hybrid option, OR
+    (b) The role is anchored to a non-Northeast US region (Account Executive - West, RVP Pacific Northwest, Sales Director - Bay Area, Account Manager LATAM, Strategic Sales EMEA, etc.) — even if the location field looks generous, the title carries the constraint, OR
+    (c) The role requires international relocation (UK, Germany, Singapore, India, EMEA broadly, APAC, etc.).
+   Setting this flag forces the composite score to 0.
+- "level_mismatch": role is far below the candidate's target seniority (entry-level / Associate / 0-3 yrs YOE).
 - "ic_role": individual-contributor sales role (AE, Sales Rep) with no team-management scope. Consumer applies the IC cap automatically.
 - "bv_role": role's primary function is Business Value Consulting / Value Engineering per the title patterns above AND seniority is Director-and-above or staff-IC. Set whenever level_recommendation = "BV".
 - "partnerships_specialist": title contains "Partnerships" or "Alliances" — softer match.

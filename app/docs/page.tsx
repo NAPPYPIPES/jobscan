@@ -308,13 +308,19 @@ export default async function Docs() {
       <Section title="Scoring rubric">
         <div className="rounded-lg border border-line bg-surface p-6 shadow-card">
           <p className="mb-4 text-sm text-fg-muted">
-            Five dimensions, weighted average, rounded to one decimal. Claude
-            produces the dimension scores; TypeScript computes the weighted
-            average and applies the IC cap. Edit{" "}
+            Five dimensions, weighted average, rounded to one decimal.
+            Sonnet (Tier&nbsp;2) produces the dimension scores;
+            TypeScript computes the weighted average and applies the IC
+            cap. Function dominates the composite because the target
+            list already pre-filters industry and stage &mdash; what
+            actually discriminates between roles in scope is whether
+            the JD&rsquo;s required skills + responsibilities map to
+            the candidate&rsquo;s demonstrated work, not whether the
+            title looks similar. Edit{" "}
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-fg">
               lib/fit/rubric.ts
             </code>{" "}
-            to tune.
+            to tune weights, anchors, caps, and thresholds.
           </p>
 
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
@@ -329,6 +335,54 @@ export default async function Docs() {
                 </span>
               </li>
             ))}
+          </ul>
+
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+            How each dimension is read
+          </h3>
+          <ul className="mb-4 space-y-2 text-sm text-fg-muted">
+            <li>
+              <strong className="text-fg">Function</strong> &mdash; the
+              JD&rsquo;s responsibilities + required skills compared to
+              the candidate&rsquo;s actual demonstrated work (team
+              leadership, ROI / value quantification, executive
+              narrative, enterprise sales motion, GTM process design).
+              Title is corroborating evidence; the work is the anchor.
+            </li>
+            <li>
+              <strong className="text-fg">Seniority</strong> &mdash;
+              bell curve around the JD&rsquo;s required years of
+              experience. Peak fit is roles asking for 10&ndash;12
+              years (target band, no over- or under-leveling). Tapers
+              in both directions: &lt;8 yrs = over-qualified; 15+ yrs =
+              at the edge / possibly seeking SVP-tier.
+            </li>
+            <li>
+              <strong className="text-fg">Industry</strong> &mdash;
+              sub-industry calibration within the watchlist. Lower
+              weight because the target list already pre-filters to
+              companies that pass the industry bar.
+            </li>
+            <li>
+              <strong className="text-fg">Stage</strong> &mdash;
+              tiebreaker only. Defaults assume a preference for
+              high-leverage growth-stage opportunities.
+            </li>
+            <li>
+              <strong className="text-fg">Location</strong> &mdash;
+              calibrates between fully&nbsp;remote, hybrid, and
+              in-office NYC. Anything outside NYC&nbsp;/ NYC metro&nbsp;/
+              US-remote is hard-flagged{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-fg">
+                relocation_required
+              </code>{" "}
+              instead, which forces the composite to 0 regardless of
+              the other dimensions. Regional sales titles
+              (&ldquo;AE&nbsp;-&nbsp;West&rdquo;, &ldquo;RVP, Bay
+              Area&rdquo;, &ldquo;Strategic Sales, EMEA&rdquo;) are
+              flagged the same way even when the location field looks
+              generous &mdash; the title carries the constraint.
+            </li>
           </ul>
 
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">

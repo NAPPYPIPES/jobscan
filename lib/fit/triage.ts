@@ -140,7 +140,36 @@ HARD EXCLUSIONS
 ================================================================
 If the role is clearly healthcare/health-tech-focused (provider, payer, biotech, medical device, healthtech): tier1_score ≤ 2, is_potential_bv = false, note "healthcare" in quick_take.
 
-If the role requires relocation outside the US: tier1_score ≤ 3.
+LOCATION FILTER — STRICT. The candidate is based in NYC and only
+considers roles that are EITHER:
+  (a) located in NYC, the NYC metro area (Westchester, Long Island,
+      Northern New Jersey commute corridor, southern Connecticut), OR
+  (b) fully US-remote (work-from-anywhere within the US).
+
+EVERYTHING ELSE is a hard miss. Set tier1_score ≤ 2, is_potential_bv =
+false, and note "wrong location" in quick_take. This includes:
+  - Single non-NYC US cities: SF, LA, Austin, Boston, Chicago, Seattle,
+    Denver, Atlanta, Dallas, Miami, DC-only, Portland, etc.
+  - Hybrid roles anchored to a non-NYC office.
+  - Country-specific roles outside the US: India, EMEA, APAC, LATAM,
+    UK, Germany, Singapore, Japan, etc.
+  - Regional sales titles outside the Northeast — even if the location
+    field looks generous, the title carries the constraint:
+      "Account Executive - West"           → wrong region
+      "AE, Bay Area"                       → wrong region
+      "Sales Director - Pacific Northwest" → wrong region
+      "RVP, West"                          → wrong region
+      "Account Manager, LATAM"             → wrong region
+      "Strategic Sales, EMEA"              → wrong region
+    Roles titled "- East", "- Northeast", "- US East" are usually
+    in-scope (covers NYC). When ambiguous, lean inclusive — Tier 2
+    will verify.
+
+When the title clearly anchors a role to a non-Northeast region OR
+the location field names a non-NYC US city without remote/hybrid
+options, score ≤ 2 even if the function and seniority are perfect.
+A great Director of Sales role in Austin is still off-thesis for this
+candidate.
 
 ================================================================
 OUTPUT

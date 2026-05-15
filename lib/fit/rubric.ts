@@ -44,54 +44,83 @@ export type ScoringRubric = {
 
 export const DEFAULT_RUBRIC: ScoringRubric = {
   dimensions: {
+    // Function dominates the composite (65%) because the candidate's
+    // target list pre-filters industry and stage — what's actually
+    // discriminating across roles in the watchlist is whether the
+    // role's primary function maps to the candidate's actual demonstrated
+    // skills (team leadership, ROI quantification, customer/exec
+    // relationships, sales process design, value selling). Title alone
+    // is a weak signal — the JD's required skills + responsibilities
+    // are the real anchor.
     function: {
-      weight: 0.30,
+      weight: 0.65,
       scale: {
         description:
-          "How closely the role's primary function matches the user's target_roles and functions.",
+          "How closely the role's required skills + actual responsibilities map to what the candidate has DONE — not just whether the title looks similar. Read the JD's responsibilities and required skills sections, compare to the candidate's resume work history and Skills sections (resume #22 and #26). Title is corroborating evidence; the work itself is the anchor.",
         anchors: [
-          { score: 10, description: "Exact match for one of the user's top target roles." },
-          { score: 8,  description: "Adjacent function in the same family (e.g. Head of Revenue when target is VP Sales)." },
-          { score: 6,  description: "Same broad area, different specialty (e.g. Sales Ops when target is Sales leadership)." },
-          { score: 4,  description: "Related but tangential (e.g. Customer Success when target is Sales)." },
-          { score: 2,  description: "Different function in the same org type (e.g. Marketing when target is Sales)." },
-          { score: 0,  description: "Outside the user's function entirely (e.g. Engineering when targets are GTM)." },
+          { score: 10, description: "Exact match for one of the candidate's target roles AND the JD's required skills (team leadership, ROI/value quantification, executive narrative, enterprise sales motion, GTM process design) appear repeatedly in the candidate's resume." },
+          { score: 9,  description: "Adjacent title in the same family (Head of Revenue / VP GTM / Director Strategic Sales) AND most required skills are demonstrated in the candidate's resume — even if the title isn't an exact match, the day-to-day work is." },
+          { score: 8,  description: "Title is adjacent OR skills overlap is strong but not both. e.g. an exact-title role at a company stage where the candidate's specific motion (enterprise vs SMB) doesn't quite fit." },
+          { score: 6,  description: "Same broad area but different specialty — e.g. RevOps / Sales Ops when target is Sales leadership; Solutions Engineering when target is Value Engineering. Some skills overlap, but day-to-day work diverges." },
+          { score: 4,  description: "Related but tangential — Customer Success / Account Management when target is Sales leadership; Partner roles when target is direct enterprise sales. Limited skill overlap." },
+          { score: 2,  description: "Different function in the same org type — e.g. Marketing / Product Marketing when target is Sales/Value leadership." },
+          { score: 0,  description: "Outside the candidate's function entirely (Engineering / Design / Finance ops when targets are GTM)." },
         ],
       },
     },
+    // Seniority is now a bell curve around required YOE rather than a
+    // strict "higher title = better" ladder. The candidate has 15+
+    // years; roles asking for 10-12 years are the peak match (target
+    // band, not over-qualified, not stretching). Roles asking for 5
+    // years suggest under-leveling. Roles asking for 15+ are at the
+    // edge — possibly looking for someone too senior, or just listing
+    // an aspirational floor. Title corroborates the band but the YOE
+    // requirement is the more reliable signal when both are present.
     seniority: {
-      weight: 0.25,
+      weight: 0.15,
       scale: {
         description:
-          "How well the role's level matches the user's seniority_level and years_experience. Adjust downward if a posted YOE requirement is far below the user's experience (suggests an under-leveled role they'd be over-qualified for).",
+          "Bell curve around the JD's required YOE. The candidate has 15+ years of experience. Peak fit is roles asking for 10-12 years (target seniority band, no over- or under-leveling). Tapers in both directions: <8 years asked = over-qualified; 15+ years asked = at the edge / possibly seeking SVP-tier the candidate is bordering on. Title is corroborating evidence but the YOE requirement is the primary signal when present. When YOE isn't stated, infer from title.",
         anchors: [
-          { score: 10, description: "VP / SVP / C-suite — strong fit for a senior leader." },
-          { score: 7,  description: "Director / Senior Director — strong fit for senior IC or first-line leader." },
-          { score: 5,  description: "Manager / Lead / Senior IC — possible fit but below target seniority." },
-          { score: 2,  description: "Mid-level IC (Senior + a function) — under-leveled for a 15+ year leader." },
-          { score: 0,  description: "Entry-level / Associate / Analyst." },
+          { score: 10, description: "JD asks for 10-12 years experience (peak band) OR title is Director / Senior Director / VP of GTM/Sales/Revenue/Value (target leadership tier). Candidate is exactly target." },
+          { score: 9,  description: "JD asks for 8-10 years OR 12-15 years (one band off the peak). OR title is Head of [function] / SVP of [function] — slightly aspirational but in range." },
+          { score: 8,  description: "JD asks for 6-8 years OR title is Senior Manager / Manager-of-managers — slightly below target band, candidate would be top of the range." },
+          { score: 7,  description: "JD asks for 15+ years explicitly (often paired with VP/SVP/C-suite titles) — candidate is at the edge of qualifying; might be aspirational." },
+          { score: 5,  description: "JD asks for 4-6 years OR title is Manager — candidate clearly over-qualified, but not absurdly so." },
+          { score: 3,  description: "JD asks for 3-5 years OR title is Senior IC + a function (Senior Account Executive, Senior Value Consultant) — candidate over-qualified." },
+          { score: 1,  description: "JD asks for <3 years OR title is Mid-level IC / Associate." },
+          { score: 0,  description: "Entry-level / Analyst / new-grad." },
         ],
       },
     },
+    // Industry is reduced to 10% because the watchlist already
+    // pre-filters to companies the candidate considers in-scope. The
+    // dimension still matters for sub-industry calibration (e.g. an
+    // AI-native infra company vs. a consumer B2C app at the same
+    // stage), but it shouldn't dominate the composite the way it did
+    // when the watchlist was broader.
     industry: {
-      weight: 0.25,
-      scale: {
-        description:
-          "How well the company's industry matches the user's industries. Score generously when the company description names a domain the user has worked in directly; score conservatively for adjacent-but-different buyer types (e.g. consumer B2C when the user is enterprise B2B).",
-        anchors: [
-          { score: 10, description: "Same industry as the user's strongest experience (direct domain expertise)." },
-          { score: 8,  description: "Adjacent regulated/enterprise industry — transferable skills." },
-          { score: 6,  description: "Different B2B industry, same buyer type." },
-          { score: 4,  description: "B2C or developer-tool when the user's background is enterprise B2B." },
-          { score: 2,  description: "Industry on the user's hard_exclusions list (also set the corresponding flag)." },
-        ],
-      },
-    },
-    stage: {
       weight: 0.10,
       scale: {
         description:
-          "Company funding/maturity stage fit. Defaults assume the user prefers high-leverage growth-stage opportunities; flip the anchors if you'd rather optimize for public-company stability.",
+          "Sub-industry calibration within the watchlist. Score generously when the company's domain matches the candidate's strongest experience; score conservatively for buyer types far from enterprise B2B (consumer B2C, dev-tools, crypto-only). Industries on the hard_exclusions list set the matching flag and force 0 across dimensions.",
+        anchors: [
+          { score: 10, description: "Candidate's strongest industry experience (financial services, enterprise B2B SaaS, AI-native enterprise infra)." },
+          { score: 8,  description: "Adjacent regulated or enterprise industry — transferable buyer + motion." },
+          { score: 6,  description: "Different B2B industry, same buyer type." },
+          { score: 4,  description: "B2C or pure dev-tool when background is enterprise B2B." },
+          { score: 2,  description: "Industry on the candidate's hard_exclusions list (also set the corresponding flag — composite forced to 0)." },
+        ],
+      },
+    },
+    // Stage is reduced to 5% — same logic as industry. The watchlist
+    // already filters to stages the candidate is interested in;
+    // stage is now a tiebreaker between two otherwise-equal roles.
+    stage: {
+      weight: 0.05,
+      scale: {
+        description:
+          "Funding / maturity stage. Defaults assume the candidate prefers high-leverage growth-stage opportunities; tiebreaker only.",
         anchors: [
           { score: 10, description: "Series B / C / D — high-leverage growth stage." },
           { score: 9,  description: "Late-stage private or public enterprise." },
@@ -101,16 +130,22 @@ export const DEFAULT_RUBRIC: ScoringRubric = {
         ],
       },
     },
+    // Location is reduced to 5% because non-NYC-metro / non-US-remote
+    // roles should be hard-flagged as relocation_required (which
+    // forces composite to 0) rather than nudged via a dimension
+    // score. The 5% remaining weight calibrates between "in-office
+    // NYC vs. remote-from-NYC vs. hybrid-NYC" — geography signal IS
+    // captured, but it's not what determines whether a role surfaces.
     location: {
-      weight: 0.10,
+      weight: 0.05,
       scale: {
         description:
-          "Geographic fit against the user's stated location constraints (encoded in the system prompt from their resume).",
+          "Geographic fit. Anything outside NYC / NYC metro / US-remote should be flagged relocation_required (forces composite to 0); within those locations, this dimension calibrates between fully remote, hybrid, and in-office NYC.",
         anchors: [
-          { score: 10, description: "User's home metro OR remote in user's country." },
-          { score: 7,  description: "Hybrid with user's metro listed as one option." },
-          { score: 4,  description: "Single different city (requires relocation)." },
-          { score: 0,  description: "International only / requires relocation outside user's country." },
+          { score: 10, description: "NYC / NYC metro in-office or hybrid; OR fully US-remote." },
+          { score: 8,  description: "Hybrid with NYC listed as one of multiple options." },
+          { score: 4,  description: "Single non-NYC US city (set relocation_required flag)." },
+          { score: 0,  description: "International / outside US (set relocation_required flag)." },
         ],
       },
     },
