@@ -60,6 +60,19 @@ export function ScoringCapsEditor({
 
   return (
     <div className="space-y-8">
+      {readOnly && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-300/80 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-200">
+          <span className="inline-flex shrink-0 items-center rounded bg-amber-900/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-900 dark:bg-amber-300/15 dark:text-amber-200">
+            Demo
+          </span>
+          <span>
+            Read-only view. Values are the owner&rsquo;s current
+            production caps. Controls are disabled — fork the repo and
+            run your own deployment to edit.
+          </span>
+        </div>
+      )}
+
       {/* Spend bars — month-to-date vs cap, color-coded */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <SpendBar label="Triage (Haiku)" {...spend.triage} />
@@ -197,11 +210,6 @@ export function ScoringCapsEditor({
           )}
         </div>
       )}
-      {readOnly && (
-        <p className="text-sm text-fg-subtle">
-          Read-only — demo viewers cannot change settings.
-        </p>
-      )}
     </div>
   );
 }
@@ -297,7 +305,7 @@ function NumberField({
         step={step ?? 1}
         readOnly={readOnly}
         disabled={readOnly}
-        className="w-24 rounded border border-line bg-surface px-2 py-1 text-right font-mono text-sm tabular-nums text-fg focus:border-line-strong focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+        className="w-24 rounded border border-line bg-surface px-2 py-1 text-right font-mono text-sm tabular-nums text-fg focus:border-line-strong focus:outline-none disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-50"
       />
     </div>
   );
@@ -342,7 +350,7 @@ function CurrencyField(props: {
           step={props.step ?? 1}
           readOnly={props.readOnly}
           disabled={props.readOnly}
-          className="w-20 rounded border border-line bg-surface px-2 py-1 text-right font-mono text-sm tabular-nums text-fg focus:border-line-strong focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-20 rounded border border-line bg-surface px-2 py-1 text-right font-mono text-sm tabular-nums text-fg focus:border-line-strong focus:outline-none disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-50"
         />
       </div>
     </div>
@@ -372,7 +380,7 @@ function ToggleField({
         type="button"
         onClick={() => !readOnly && onChange(!value)}
         disabled={readOnly}
-        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${value ? "bg-fg" : "bg-line"}`}
+        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-50 ${value ? "bg-fg" : "bg-line"}`}
       >
         <span
           className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-bg shadow ring-0 transition-transform ${value ? "translate-x-5" : "translate-x-0"}`}

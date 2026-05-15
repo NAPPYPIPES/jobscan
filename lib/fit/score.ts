@@ -254,6 +254,83 @@ Internal consistency required:
   - flag = "partnerships_specialist" → level_recommendation ≤ "MEDIUM"
 
 ================================================================
+BV DIMENSION CALIBRATION — OVERRIDE FOR BV-PATTERN ROLES
+================================================================
+When you assign level_recommendation = BV, the default rubric anchors
+under-score the role. Apply these BV-specific overrides:
+
+  function:  ALWAYS 10. By definition, BV titles (Value Engineer /
+             Value Consultant / Business Value / Value Realization /
+             Value Advisory / Value Architecture / Value Services)
+             ARE the candidate's target role — exact match.
+
+  seniority: Use this BV-specific scale, NOT the generic rubric scale.
+             The candidate considers staff-IC at top AI/SaaS companies
+             to be at-target seniority — those companies use IC-track
+             titles (Principal, Staff, Lead, "Value Engineer") for
+             roles that other companies would title Director. Score
+             accordingly:
+                 10  Senior Director / VP / Head of BV at any company,
+                     OR staff-IC titles ("Value Engineer", "Senior
+                     Value Engineer", "Principal Value Advisor",
+                     "Business Value Consultant") at top-tier AI,
+                     SaaS, or fintech companies (OpenAI, Anthropic,
+                     Databricks, Glean, Cursor, Sierra, Decagon,
+                     Stripe, MongoDB, Snowflake, Cohere, Mistral,
+                     Twilio, Plaid, Brex, etc).
+                  9  "Value Consultant" or "Value Engineer" titles at
+                     companies further from the top-tier AI/SaaS
+                     cluster, OR Manager-of-Value-Consultants at any
+                     company.
+                  8  Senior Manager of a small Value team.
+                  7  Manager-level Value Consultant (under target —
+                     usually downgrade to HIGH not BV).
+             Do NOT use the generic "VP/SVP = 10, Director = 7" anchor
+             from the rubric — that scale assumes a non-BV target.
+
+  industry:  AI-native (OpenAI, Anthropic, Databricks, Cohere, Glean,
+             Cursor, Sierra) and enterprise SaaS / fintech BV roles
+             score 9-10. Only downgrade for genuinely off-thesis
+             companies (consumer B2C, crypto-only, healthcare).
+
+  stage:     Use the default rubric anchors — BV doesn't change stage
+             fit math.
+
+  location:  Use the default rubric anchors — BV doesn't change
+             geography math.
+
+The OVERALL composite (weighted-average) score for confirmed BV matches
+must land 9.5–9.9 by default. The candidate considers a BV role at any
+top-fit company to be "basically the same job" as their prior Salesforce
+position — so the scoring should reflect that. Only downgrade below 9.5
+if there's a clear soft dimension (Manager-level not staff-IC, off-thesis
+industry, requires relocation).
+
+Reserve 10.0 ONLY for the literal pre-employer: the actual title
+"Senior Director, Business Value Services, Financial Services" at
+Salesforce specifically. Every other BV role at any other company caps
+at 9.9, because by definition it isn't the literal prior job.
+
+Calibration examples (target overall scores):
+  - "Senior Director, BVS, FinServ" at Salesforce (literal prior job) → 10.0
+  - "Value Engineer, AI Success - NYC" at OpenAI                      → 9.9 (basically the same job; AI-native; NYC)
+  - "Business Value Consultant, Financial Services" at Databricks     → 9.9 (same vertical + BV title at a top AI infra co)
+  - "Business Value Consultant" at Glean                              → 9.7 (BV title at strong AI infra co; minor industry softness)
+  - "Business Value Consultant" at Decagon                            → 9.6 (BV title at AI-native scale-up)
+  - "Senior Value Engineer" at Twilio                                 → 9.3 (BV title, AI-adjacent but enterprise comm not AI-native)
+  - "Director of Value Engineering" at MongoDB                        → 9.7
+  - "Value Consultant" at Manager level at any company                → NOT BV → assign HIGH
+  - "Value Engineer" at a healthcare-vertical company                 → BV but flag healthcare_excluded, level LOW
+
+Crucial: under the BV-specific seniority scale, "staff-IC at a top AI
+or enterprise SaaS company" (Principal / Staff / Lead / Senior Principal /
+"Value Engineer" titled as IC) maps to seniority = 9, NOT 7. That's the
+candidate's exact target seniority band for BV practitioner roles.
+Director-of-BV-Practice = 10. Anything below Manager-of-Value-Consultants
+in a BV title is the role being under-leveled for the candidate, not the
+candidate being a fit for an under-leveled role.
+
+================================================================
 OUTPUT
 ================================================================
 Return this JSON exactly. No other text. No markdown fences.
