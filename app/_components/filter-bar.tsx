@@ -1,6 +1,7 @@
 "use client";
 
 import type { Level, Sector } from "@/lib/scan/types";
+import CompanySearch, { type CompanyOption } from "./company-search";
 
 export type Since = "24h" | "48h" | "72h";
 
@@ -88,11 +89,40 @@ type Props = {
   onClearCompany: () => void;
   searchQuery: string;
   onChangeSearch: (q: string) => void;
+  // Full set of distinct companies in the current view (post level/
+  // sector/since filters). Drives the autocomplete dropdown.
+  companyOptions: CompanyOption[];
+  onSelectCompany: (slug: string) => void;
   sort: Sort;
   onChangeSort: (s: Sort) => void;
   totalShown: number;
   totalAvailable: number;
 };
+
+// Tap-target sizing notes. Mobile gets py-2 (~36px tall) which is just
+// shy of the 44px HIG ideal but reads as an actionable button rather
+// than a tag; desktop gets the original tighter py-1. Padding x stays
+// consistent. The size differential is set per-chip via classes below.
+const CHIP_BASE =
+  "inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium tracking-tight ring-1 ring-inset transition-all sm:py-1 sm:text-xs";
+const CHIP_OFF =
+  "bg-surface text-fg-muted ring-line hover:ring-line-strong";
+
+const SEGMENT_BASE =
+  "inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium tracking-tight transition-colors sm:py-1 sm:text-xs";
+const SEGMENT_OFF = "text-fg-muted hover:text-fg";
+const SEGMENT_ON = "bg-fg text-canvas";
+
+// Section-label helper. Block on mobile so chips wrap cleanly under
+// the label rather than fighting it for horizontal space; inline-block
+// on desktop where the original "label + chips on one row" reads fine.
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="block text-[11px] font-medium uppercase tracking-wider text-fg-subtle sm:mr-1 sm:inline">
+      {children}
+    </span>
+  );
+}
 
 export default function FilterBar({
   selectedLevels,
@@ -108,38 +138,26 @@ export default function FilterBar({
   onClearCompany,
   searchQuery,
   onChangeSearch,
+  companyOptions,
+  onSelectCompany,
   sort,
   onChangeSort,
   totalShown,
   totalAvailable,
 }: Props) {
   return (
-    <div className="flex flex-col gap-4 border-b border-line/70 pb-6">
-      <div className="relative">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => onChangeSearch(e.target.value)}
-          placeholder="Search by company"
-          className="w-full rounded-lg border border-line bg-input px-3.5 py-2 pr-9 text-sm text-fg placeholder:text-fg-faint focus:border-line-strong focus:outline-none"
-          aria-label="Search by company"
-        />
-        {searchQuery && (
-          <button
-            type="button"
-            onClick={() => onChangeSearch("")}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-fg-subtle transition-colors hover:bg-muted hover:text-fg"
-            aria-label="Clear search"
-          >
-            ×
-          </button>
-        )}
-      </div>
+    <div className="flex flex-col gap-4 border-b border-line/70 pb-6 sm:gap-3">
+      <CompanySearch
+        companies={companyOptions}
+        query={searchQuery}
+        onChangeQuery={onChangeSearch}
+        onSelectCompany={onSelectCompany}
+        pinnedCompanyName={companyFilter}
+        onClearPinned={onClearCompany}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-          Level
-        </span>
+        <SectionLabel>Level</SectionLabel>
         {LEVELS.map((level) => {
           const active = selectedLevels.has(level);
           return (
@@ -147,11 +165,7 @@ export default function FilterBar({
               key={level}
               type="button"
               onClick={() => onToggleLevel(level)}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium tracking-tight ring-1 ring-inset transition-all ${
-                active
-                  ? LEVEL_ACTIVE[level]
-                  : "bg-surface text-fg-muted ring-line hover:ring-line-strong"
-              }`}
+              className={`${CHIP_BASE} ${active ? LEVEL_ACTIVE[level] : CHIP_OFF}`}
             >
               <Checkbox active={active} />
               <span>{LEVEL_LABEL[level]}</span>
@@ -169,9 +183,7 @@ export default function FilterBar({
 
       {since !== undefined && onChangeSince && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-            Posted within
-          </span>
+          <SectionLabel>Posted within</SectionLabel>
           <div className="inline-flex items-center gap-1 rounded-full border border-line bg-surface p-0.5">
             {SINCE_OPTIONS.map((opt) => {
               const active = since === opt.value;
@@ -181,11 +193,7 @@ export default function FilterBar({
                   key={opt.value}
                   type="button"
                   onClick={() => onChangeSince(opt.value)}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium tracking-tight transition-colors ${
-                    active
-                      ? "bg-fg text-canvas"
-                      : "text-fg-muted hover:text-fg"
-                  }`}
+                  className={`${SEGMENT_BASE} rounded-full ${active ? SEGMENT_ON : SEGMENT_OFF}`}
                 >
                   <span>{opt.label}</span>
                   {count !== undefined && (
@@ -205,9 +213,7 @@ export default function FilterBar({
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-          Sector
-        </span>
+        <SectionLabel>Sector</SectionLabel>
         {SECTORS.map((sector) => {
           const active = selectedSectors.has(sector);
           return (
@@ -215,11 +221,7 @@ export default function FilterBar({
               key={sector}
               type="button"
               onClick={() => onToggleSector(sector)}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium tracking-tight ring-1 ring-inset transition-all ${
-                active
-                  ? "bg-fg text-canvas ring-fg"
-                  : "bg-surface text-fg-muted ring-line hover:ring-line-strong"
-              }`}
+              className={`${CHIP_BASE} ${active ? "bg-fg text-canvas ring-fg" : CHIP_OFF}`}
             >
               <Checkbox active={active} />
               <span>{SECTOR_LABEL[sector]}</span>
@@ -235,27 +237,8 @@ export default function FilterBar({
         })}
       </div>
 
-      {companyFilter && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-            Company
-          </span>
-          <button
-            type="button"
-            onClick={onClearCompany}
-            className="inline-flex items-center gap-1.5 rounded-full bg-fg px-3 py-1 text-xs font-medium tracking-tight text-canvas transition-opacity hover:opacity-80"
-            title="Clear company filter"
-          >
-            <span>{companyFilter}</span>
-            <span aria-hidden className="text-canvas/70">×</span>
-          </button>
-        </div>
-      )}
-
       <div className="flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-          Sort
-        </span>
+        <SectionLabel>Sort</SectionLabel>
         <div className="inline-flex items-center gap-1 rounded-full border border-line bg-surface p-0.5">
           {SORT_OPTIONS.map((opt) => {
             const active = sort === opt.value;
@@ -265,11 +248,7 @@ export default function FilterBar({
                 type="button"
                 onClick={() => onChangeSort(opt.value)}
                 title={opt.title}
-                className={`rounded-full px-3 py-1 text-xs font-medium tracking-tight transition-colors ${
-                  active
-                    ? "bg-fg text-canvas"
-                    : "text-fg-muted hover:text-fg"
-                }`}
+                className={`${SEGMENT_BASE} rounded-full ${active ? SEGMENT_ON : SEGMENT_OFF}`}
               >
                 {opt.label}
               </button>

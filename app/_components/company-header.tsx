@@ -76,13 +76,13 @@ export default function CompanyHeader({
       type="button"
       onClick={onToggle}
       aria-expanded={!collapsed}
-      className="-mx-2 mb-3 flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted"
+      className="-mx-2 mb-3 flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-muted sm:py-1.5"
     >
       <CompanyLogo domain={domain} displayName={displayName} />
-      <h2 className="text-base font-semibold tracking-tight text-fg">
+      <h2 className="truncate text-base font-semibold tracking-tight text-fg">
         {displayName}
       </h2>
-      <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ring-line">
+      <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ring-line">
         <span className="font-mono tabular-nums text-fg-muted">{count}</span>
         <span className="text-fg-subtle">{noun}</span>
       </span>

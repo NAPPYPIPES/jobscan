@@ -141,6 +141,18 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
 
   const onClearCompany = () => setParam("company", null);
   const onChangeSearch = (q: string) => setParam("q", q || null);
+  // Pin a specific company (strict slug filter). Clears the loose
+  // text query so the chip filter is the only active narrowing —
+  // avoids the confusing "company chip + text search both active"
+  // state that produces zero results when the query doesn't match
+  // the selected company name.
+  const onSelectCompany = (slug: string) => {
+    const next = new URLSearchParams(params.toString());
+    next.set("company", slug);
+    next.delete("q");
+    const qs = next.toString();
+    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+  };
 
   const inWindow = useMemo(() => {
     if (mode === "all") return matches;
@@ -168,6 +180,28 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
     if (selectedSectors.size === ALL_SECTORS.length) return inWindow;
     return inWindow.filter((m) => selectedSectors.has(sectorForSlug(m.companySlug)));
   }, [inWindow, selectedSectors]);
+
+  // Distinct companies in the current sector-filtered set, with their
+  // role counts. Drives the autocomplete dropdown. We compute against
+  // inSector (not visible) so the suggestion list reflects what the
+  // user can actually navigate to, including levels they've filtered
+  // out — typing "an" should still find Anthropic even if BV is
+  // currently deselected.
+  const companyOptions = useMemo(() => {
+    const map = new Map<string, { slug: string; displayName: string; count: number }>();
+    for (const m of inSector) {
+      let row = map.get(m.companySlug);
+      if (!row) {
+        row = { slug: m.companySlug, displayName: m.companyDisplayName, count: 0 };
+        map.set(m.companySlug, row);
+      }
+      row.count++;
+    }
+    return Array.from(map.values()).map((r) => ({
+      ...r,
+      domain: COMPANY_DOMAINS[r.slug],
+    }));
+  }, [inSector]);
 
   const inCompany = useMemo(() => {
     if (!companyParam) return inSector;
@@ -281,6 +315,8 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
         onClearCompany={onClearCompany}
         searchQuery={searchQuery}
         onChangeSearch={onChangeSearch}
+        companyOptions={companyOptions}
+        onSelectCompany={onSelectCompany}
         sort={sort}
         onChangeSort={onChangeSort}
         totalShown={visible.length}

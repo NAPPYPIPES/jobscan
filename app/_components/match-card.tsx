@@ -273,12 +273,12 @@ export default function MatchCard({
         applied ? "opacity-60 hover:opacity-100" : ""
       }`}
     >
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4">
         <a
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex min-w-0 flex-1 items-center gap-3"
+          className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3"
         >
           <span
             className={`inline-flex w-12 shrink-0 justify-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${LEVEL_PILL[m.level]}`}
@@ -313,7 +313,7 @@ export default function MatchCard({
         {isDemo && m.level !== "LOW" && (
           <span
             title={DEMO_TOOLTIP}
-            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-fg-faint opacity-60"
+            className="inline-flex h-9 shrink-0 items-center gap-1 rounded px-2 text-[11px] font-medium text-fg-faint opacity-60 sm:h-auto sm:px-1.5 sm:py-1"
             aria-label="AI analysis disabled in demo mode"
           >
             <span>AI</span>
@@ -332,7 +332,7 @@ export default function MatchCard({
               e.stopPropagation();
               onToggleSummary();
             }}
-            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-fg-subtle transition-colors hover:bg-muted hover:text-fg"
+            className="inline-flex h-9 shrink-0 items-center gap-1 rounded px-2 text-[11px] font-medium text-fg-subtle transition-colors hover:bg-muted hover:text-fg sm:h-auto sm:px-1.5 sm:py-1"
           >
             <span>AI</span>
             <svg
@@ -349,6 +349,10 @@ export default function MatchCard({
             </svg>
           </button>
         )}
+        {/* Apply toggle: tap-target wrapper expands the hit-area on
+            mobile while the visible track stays compact. The flex
+            wrapper picks up the click on whitespace around the small
+            switch graphic. */}
         <button
           type="button"
           role="switch"
@@ -363,19 +367,23 @@ export default function MatchCard({
           onClick={isDemo ? (e) => { e.preventDefault(); e.stopPropagation(); } : onToggle}
           disabled={pending || isDemo}
           title={isDemo ? DEMO_TOOLTIP : undefined}
-          className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed ${
-            isDemo
-              ? "bg-line opacity-50"
-              : applied
-                ? "bg-emerald-500"
-                : "bg-line hover:bg-line-strong"
-          }`}
+          className="inline-flex h-9 shrink-0 items-center justify-center px-1 disabled:cursor-not-allowed sm:h-auto sm:px-0"
         >
           <span
-            className={`inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition-transform ${
-              applied && !isDemo ? "translate-x-3.5" : "translate-x-0.5"
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors sm:h-4 sm:w-7 ${
+              isDemo
+                ? "bg-line opacity-50"
+                : applied
+                  ? "bg-emerald-500"
+                  : "bg-line group-hover:bg-line-strong"
             }`}
-          />
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform sm:h-3 sm:w-3 ${
+                applied && !isDemo ? "translate-x-[18px] sm:translate-x-3.5" : "translate-x-0.5"
+              }`}
+            />
+          </span>
         </button>
         <button
           type="button"
@@ -383,14 +391,14 @@ export default function MatchCard({
           onClick={isDemo ? (e) => { e.preventDefault(); e.stopPropagation(); } : onDismissClick}
           disabled={pending || isDemo}
           title={isDemo ? DEMO_TOOLTIP : undefined}
-          className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-fg-faint transition-colors disabled:cursor-not-allowed ${
+          className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded text-fg-faint transition-colors disabled:cursor-not-allowed sm:h-4 sm:w-4 ${
             isDemo
               ? "opacity-40"
               : "hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 disabled:cursor-wait"
           }`}
         >
           <svg
-            className="h-2.5 w-2.5"
+            className="h-3 w-3 sm:h-2.5 sm:w-2.5"
             viewBox="0 0 10 10"
             fill="none"
             stroke="currentColor"
@@ -401,7 +409,7 @@ export default function MatchCard({
             <path d="M2 2 L8 8 M8 2 L2 8" />
           </svg>
         </button>
-        <time className="w-16 shrink-0 text-right font-mono text-[11px] tabular-nums text-fg-subtle">
+        <time className="w-12 shrink-0 text-right font-mono text-[10px] tabular-nums text-fg-subtle sm:w-16 sm:text-[11px]">
           {timeAgo(m.firstSeen)}
         </time>
       </div>
