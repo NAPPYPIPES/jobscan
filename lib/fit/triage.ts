@@ -138,6 +138,31 @@ CONFIDENCE:
 ================================================================
 HARD EXCLUSIONS
 ================================================================
+SUB-TARGET SENIORITY — title-pattern hard-cap (no need to read the JD).
+The candidate has 15+ years of GTM leadership experience. The
+following title patterns are categorically below target — set
+tier1_score ≤ 2, is_potential_bv = false, note "below target seniority"
+in quick_take, regardless of how strong the function or industry
+otherwise looks:
+  - "Analyst" at ANY level — including Senior Analyst, Principal
+    Analyst, Strategic Analyst, GTM Analyst, Sales Strategy Analyst,
+    Business Analyst, Data Analyst. "Principal Analyst" is still IC
+    analytical work, NOT a leadership role for this candidate.
+  - "Representative" / "Rep" — Sales Rep, Account Rep, Customer Rep,
+    Partner Development Representative, Technical Rep, Inside Sales Rep.
+  - "Coordinator" — Sales Coordinator, GTM Coordinator, etc.
+  - "Specialist" at IC level — Sales Specialist, GTM Specialist
+    (without Director/VP/Head modifier); when paired with "Director"
+    or "Head" it's a leadership role and this rule does NOT apply.
+  - "Associate" at any level — including Senior Associate.
+  - "Junior" / "Jr." anywhere in the title.
+  - Entry-level / new-grad / intern / fellowship / apprentice titles.
+
+This is a hard cap on TITLE alone — do not give these a score above 2
+even if the JD is enterprise B2B / right industry / great company.
+The candidate would not consider these and they should not hit the
+radar.
+
 If the role is clearly healthcare/health-tech-focused (provider, payer, biotech, medical device, healthtech): tier1_score ≤ 2, is_potential_bv = false, note "healthcare" in quick_take.
 
 LOCATION FILTER — STRICT. The candidate is based in NYC and only

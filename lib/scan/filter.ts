@@ -148,8 +148,25 @@ function hasKeyword(normalized: string, keyword: string): boolean {
 // Generic classifier vocabularies (stay in code — useful for any user)
 // ──────────────────────────────────────────────────────────────────────
 
+// Sub-target-level titles that get filtered at the rule layer — never
+// inserted into matches.* at all. Pre-AI guard: cheapest possible
+// way to keep these off the radar regardless of how the AI tiers
+// would have read them.
+//
+// "analyst" — every flavor (Senior Analyst, Principal Analyst,
+//   Strategic Analyst, GTM Analyst, etc.). Even "Principal Analyst"
+//   is below the candidate's Director-and-up target. The rare
+//   "Director, Analyst Relations" leadership role would survive only
+//   if it doesn't have "analyst" as a standalone token in the title;
+//   if a real one slips through and gets filtered, add an explicit
+//   exception then.
+// "representative" — captures Sales Rep, Customer Rep, Partner
+//   Development Representative, Account Representative, Technical
+//   Rep, etc. SDR/BDR already covered by separate entries.
 const SKIP_KEYWORDS = [
   "sdr", "bdr", "intern", "junior", "associate",
+  "analyst",
+  "representative",
   "sales development representative", "business development representative",
 ];
 

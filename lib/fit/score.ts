@@ -220,7 +220,12 @@ FLAG RULES — set exactly one
     (b) The role is anchored to a non-Northeast US region (Account Executive - West, RVP Pacific Northwest, Sales Director - Bay Area, Account Manager LATAM, Strategic Sales EMEA, etc.) — even if the location field looks generous, the title carries the constraint, OR
     (c) The role requires international relocation (UK, Germany, Singapore, India, EMEA broadly, APAC, etc.).
    Setting this flag forces the composite score to 0.
-- "level_mismatch": role is far below the candidate's target seniority (entry-level / Associate / 0-3 yrs YOE).
+- "level_mismatch": role is below the candidate's target seniority. Set this WHENEVER the title contains any of:
+    - "Analyst" at any level (Senior Analyst, Principal Analyst, Strategic Analyst, GTM Analyst, Sales Strategy Analyst, etc.) — even Principal Analyst is IC analytical work, NOT a leadership role for this candidate.
+    - "Representative" / "Rep" (Sales Rep, Account Rep, Partner Development Representative, etc.).
+    - "Coordinator", "Associate" (any level), "Junior" / "Jr.", "Specialist" without a Director/VP/Head leadership modifier, "Intern", "Fellow", "Apprentice", "Entry-level", "Mid-level IC".
+    - YOE requirement of 0-3 years.
+   These are TITLE-LEVEL hard rules — don't soften them based on a strong JD; the candidate categorically would not pursue these. When this flag is set, level_recommendation MUST be LOW.
 - "ic_role": individual-contributor sales role (AE, Sales Rep) with no team-management scope. Consumer applies the IC cap automatically.
 - "bv_role": role's primary function is Business Value Consulting / Value Engineering per the title patterns above AND seniority is Director-and-above or staff-IC. Set whenever level_recommendation = "BV".
 - "partnerships_specialist": title contains "Partnerships" or "Alliances" — softer match.
