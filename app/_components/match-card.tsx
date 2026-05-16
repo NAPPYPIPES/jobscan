@@ -1,10 +1,12 @@
 "use client";
 
 import { memo, useEffect, useState, useTransition } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { Match, DismissReason } from "@/db/schema";
 import type { Level } from "@/lib/scan/types";
 import type { Role } from "@/lib/auth/cookie";
+import { logoUrl } from "@/lib/scan/logos";
 
 // Apply URL is pre-computed server-side (in page.tsx / all/page.tsx)
 // and threaded onto each row. Keeps the client bundle free of
@@ -94,16 +96,26 @@ function ReasonCheckbox({
 // parent. This lets the parent pass a SINGLE stable callback (via
 // useCallback) instead of creating one closure per card per render
 // (which would defeat memo).
+//
+// showCompanyLogo + companyDomain: opt-in row prefix used by the
+// flat score-sort view. Off by default (the company section header
+// already shows the logo when grouped). When on, renders a 24px logo
+// at the start of the row so the user can identify the company
+// without the section header.
 function MatchCardImpl({
   m,
   isSummaryOpen,
   onToggleSummary,
   viewerRole,
+  showCompanyLogo = false,
+  companyDomain,
 }: {
   m: MatchWithUrl;
   isSummaryOpen: boolean;
   onToggleSummary: (id: string) => void;
   viewerRole: Role;
+  showCompanyLogo?: boolean;
+  companyDomain?: string;
 }) {
   const isDemo = viewerRole === "demo";
   const href = m.applyUrl;
@@ -290,6 +302,12 @@ function MatchCardImpl({
           rel="noopener noreferrer"
           className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3"
         >
+          {showCompanyLogo && (
+            <RowLogo
+              domain={companyDomain}
+              displayName={m.companyDisplayName}
+            />
+          )}
           <span
             className={`inline-flex w-12 shrink-0 justify-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${LEVEL_PILL[m.level]}`}
           >
@@ -432,6 +450,37 @@ function MatchCardImpl({
         />
       )}
     </div>
+  );
+}
+
+// Inline logo used by the flat score-sort row layout. Mirrors
+// CompanyHeader's CompanyLogo but at row scale (20px) and without the
+// state machine — the favicon URL just renders, and the tiny letter
+// circle picks up if `unoptimized` Image errors. For the score-sort
+// view there's no error-state setState here because each row is its
+// own component instance and the few logo 404s don't justify the
+// state plumbing across hundreds of memoized rows.
+function RowLogo({ domain, displayName }: { domain?: string; displayName: string }) {
+  if (!domain) {
+    return (
+      <div
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold text-fg-muted"
+        title={displayName}
+      >
+        {displayName.charAt(0)}
+      </div>
+    );
+  }
+  return (
+    <Image
+      src={logoUrl(domain)}
+      alt=""
+      width={20}
+      height={20}
+      title={displayName}
+      className="h-5 w-5 shrink-0 rounded object-contain"
+      unoptimized
+    />
   );
 }
 

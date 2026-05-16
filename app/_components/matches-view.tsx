@@ -270,6 +270,20 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
     return groups;
   }, [visible, sort]);
 
+  // Flat list ordered by effective score desc, used by the score-sort
+  // layout. Independent of `grouped` (which still groups by company
+  // even under sort=score). Tie-break by recency so two equal-score
+  // roles surface the newer one first.
+  const flatByScore = useMemo(() => {
+    if (sort !== "score") return [] as MatchWithUrl[];
+    return [...visible].sort((a, b) => {
+      const sa = effectiveScore(a);
+      const sb = effectiveScore(b);
+      if (sa !== sb) return sb - sa;
+      return b.firstSeen.getTime() - a.firstSeen.getTime();
+    });
+  }, [visible, sort]);
+
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const [openSummaryId, setOpenSummaryId] = useState<string | null>(null);
@@ -326,7 +340,7 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
         totalAvailable={inSearch.length}
       />
 
-      {grouped.length === 0 ? (
+      {visible.length === 0 ? (
         <div className="empty-state p-12 text-center">
           <p className="text-sm text-fg-subtle">
             {mode === "recent"
@@ -334,6 +348,26 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
               : "No matches with current filters."}
           </p>
         </div>
+      ) : sort === "score" ? (
+        // Flat score-sort layout. Drops the company section headers
+        // and renders every visible row in a single descending list.
+        // Each row gets a small company-logo prefix so the user can
+        // still tell which company it's at without the section header.
+        // No "Collapse all" button — there are no groups to collapse.
+        <ul className="flex flex-col gap-2">
+          {flatByScore.map((m) => (
+            <li key={m.id}>
+              <MatchCard
+                m={m}
+                isSummaryOpen={openSummaryId === m.id}
+                onToggleSummary={onToggleSummary}
+                viewerRole={viewerRole}
+                showCompanyLogo
+                companyDomain={COMPANY_DOMAINS[m.companySlug]}
+              />
+            </li>
+          ))}
+        </ul>
       ) : (
         <>
           <div className="-mt-2 flex justify-end">
