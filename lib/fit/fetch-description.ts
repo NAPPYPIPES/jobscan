@@ -1,5 +1,6 @@
+import { getWorkdayBoards } from "@/db/workday-tenants";
 import { htmlToText } from "@/lib/scan/filter";
-import type { Ats } from "@/lib/scan/types";
+import type { Ats, WorkdayJobDetail } from "@/lib/scan/types";
 
 // Cap on the extract passed to Claude. ~3500 chars ≈ 600 words ≈ ~800
 // input tokens. Sized to retain role summary + responsibilities +
@@ -76,9 +77,14 @@ export function extractScoringText(plain: string): string {
 // the JD text after the fact has to go back to the source.
 //
 // Returns null when the role is no longer listed (closed/removed) or
-// when the ATS doesn't expose descriptions in its list endpoint
-// (Workday — by design, we don't pay the per-job fetch cost just to
-// score those tenants).
+// when the source endpoint doesn't return a body.
+//
+// For Workday, the list endpoint omits descriptions but the per-job
+// endpoint does include them. The scan adapter already hydrates
+// descriptions for in-scope roles; this fetch is the on-demand path
+// for the scoring tier (which doesn't keep description state on the
+// matches row). `jobId` for Workday is the externalPath (leading slash
+// included), reused from the adapter.
 export async function fetchDescription(
   ats: Ats,
   slug: string,
@@ -107,8 +113,16 @@ export async function fetchDescription(
     const job = arr.find((j) => j.id === jobId);
     return job?.descriptionPlain ?? null;
   }
-  // Workday: no description on list endpoint, intentionally not
-  // N+1-fetching for scoring. Caller treats null as "skip this row,
-  // leave fit_score null."
+  if (ats === "workday") {
+    const boards = await getWorkdayBoards();
+    const cfg = boards[slug];
+    if (!cfg) return null;
+    const url = `https://${slug}.${cfg.host}.myworkdayjobs.com/wday/cxs/${slug}/${cfg.board}${jobId}`;
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    const json = (await res.json()) as WorkdayJobDetail;
+    const html = json.jobPostingInfo?.jobDescription;
+    return html ? htmlToText(html) : null;
+  }
   return null;
 }

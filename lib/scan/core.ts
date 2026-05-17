@@ -47,11 +47,6 @@ export function buildCompanyResult(args: {
       return { j, level: finalLevel };
     })
     .filter((x): x is { j: RawJob; level: Level } => x.level !== null)
-    // Drop LOW + Workday-multi-location combo: the "N Locations"
-    // pass-through in isInScope is intentional for surfacing senior
-    // roles (BV/HIGH/MED) that we can't disambiguate without per-job
-    // fetches, but at LOW level it's mostly noise.
-    .filter((x) => !(x.level === "LOW" && /^\d+ locations$/i.test(x.j.location.trim())))
     .sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
 
   const counts: Record<Level, number> = { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };

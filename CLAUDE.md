@@ -199,9 +199,14 @@ back to generic vocabulary, no warning needed.
   convenience (`ALTER TABLE matches DROP COLUMN list`); SR rows can
   be deleted (`DELETE FROM matches WHERE ats = 'smartrecruiters'`).
   Fresh installs (`drizzle-kit push` from clean) don't have these.
-- **Workday limitation.** Workday's list endpoint doesn't return
-  descriptions. Workday roles get rule-based classification only —
-  level badges but no fit score. See
+- **Workday hydration cost.** Workday's list endpoint doesn't return
+  descriptions; the adapter does a bounded N+1 against the per-job
+  endpoint for roles that already passed isInScope + the title-level
+  classifier. The hydrated description feeds both
+  `applyDescriptionShift` (scan-time) and the AI fit-scorer (scoring
+  tier — `fetchDescription` re-fetches on demand). For Workday
+  tenants the in-scope + classify-passing subset is typically 10–40
+  roles per tenant, so the extra HTTP fan-out is fine hourly. See
   `lib/scan/adapters/workday.ts` header.
 - **Client / server boundary.** Anything pulling `db/*` or
   `lib/scan/{filter,urls,adapters/*,run,core}` is server-only.

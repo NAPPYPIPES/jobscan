@@ -91,12 +91,16 @@ export type WorkdayResponse = {
 };
 
 // Per-job endpoint — returns the actual location list for multi-location
-// postings (the list endpoint only gives the "N Locations" placeholder).
+// postings (the list endpoint only gives the "N Locations" placeholder)
+// PLUS the full job description HTML. We hydrate description for any
+// role that passes the title-level classifier so applyDescriptionShift
+// can run AND the AI fit-scorer has something to read.
 export type WorkdayJobDetail = {
   jobPostingInfo: {
     location: string;
     additionalLocations?: string[];
     startDate?: string;
+    jobDescription?: string;
   };
 };
 

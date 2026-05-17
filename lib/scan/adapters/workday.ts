@@ -1,8 +1,10 @@
 import type { LoadedPersonalKeywords } from "@/db/personal-keywords";
 import { getWorkdayBoards, workdayApiUrl } from "@/db/workday-tenants";
 import { buildCompanyResult } from "../core";
+import { classifyRole, htmlToText, isInScope } from "../filter";
 import type {
   CompanyResult,
+  RawJob,
   Target,
   WorkdayJob,
   WorkdayJobDetail,
@@ -10,19 +12,22 @@ import type {
 } from "../types";
 
 // ──────────────────────────────────────────────────────────────────────
-// IMPORTANT — Workday limitation
+// Workday adapter — list + per-job description hydration
 // ──────────────────────────────────────────────────────────────────────
 // Workday's public list endpoint returns title + location + jobId but
-// NOT the job description. The classifier still runs against the title
-// (so Workday roles surface in scan results and the daily digest if
-// the title classifies BV/HIGH), but the description-shift pass and
-// the Claude fit-scoring pass both skip Workday roles. Workday roles
-// in the UI will show a level badge but no fit score.
+// NOT the job description. To get a description we have to hit the
+// per-job endpoint, which is bounded N+1.
 //
-// For deeper Workday integration you'd need per-job description
-// fetches — typically via Apify or a headless browser. Not included
-// here. As a workaround for any Workday tenant you really care about,
-// add it to manual-companies.json so it shows up on /manual instead.
+// Strategy: list-fetch everything → location-filter (cheap) →
+// title-classify (cheap) → hydrate per-job detail (location +
+// description) ONLY for survivors. The hydrated description lets
+// applyDescriptionShift run AND makes the role eligible for the AI
+// fit-scoring tier (which fetches descriptions via lib/fit/fetch-
+// description.ts on demand for unscored rows).
+//
+// For a typical Workday tenant the in-scope + classify-passing subset
+// is small (10–40 jobs out of hundreds), so the extra per-job fetches
+// are cheap enough to run hourly.
 // ──────────────────────────────────────────────────────────────────────
 
 const PAGE_LIMIT = 20;
@@ -57,25 +62,31 @@ async function fetchPage(url: string, offset: number): Promise<WorkdayResponse> 
   return (await res.json()) as WorkdayResponse;
 }
 
-async function fetchJobLocations(
+// Single per-job GET that returns both the resolved location list (for
+// multi-location postings) AND the full HTML description. Replaces the
+// prior fetchJobLocations helper. Failure modes return nulls; the
+// caller falls back to the list-endpoint values.
+async function fetchJobDetail(
   slug: string,
   externalPath: string,
-): Promise<string | null> {
+): Promise<{ location: string | null; description: string | null }> {
   const boards = await getWorkdayBoards();
   const cfg = boards[slug];
-  if (!cfg) return null;
+  if (!cfg) return { location: null, description: null };
   const url = `https://${slug}.${cfg.host}.myworkdayjobs.com/wday/cxs/${slug}/${cfg.board}${externalPath}`;
   try {
     const res = await fetch(url, { headers: { Accept: "application/json" } });
-    if (!res.ok) return null;
+    if (!res.ok) return { location: null, description: null };
     const data = (await res.json()) as WorkdayJobDetail;
     const info = data.jobPostingInfo;
-    if (!info) return null;
+    if (!info) return { location: null, description: null };
     const all = [info.location, ...(info.additionalLocations ?? [])].filter(Boolean);
-    return all.length ? all.join(" | ") : null;
+    const location = all.length ? all.join(" | ") : null;
+    const description = info.jobDescription ? htmlToText(info.jobDescription) : null;
+    return { location, description };
   } catch (err) {
     console.error(`workday: per-job fetch failed for ${slug}${externalPath}:`, err);
-    return null;
+    return { location: null, description: null };
   }
 }
 
@@ -106,26 +117,36 @@ export async function scanWorkdayCompany(
   for (const p of restPages) allJobs.push(...p.jobPostings);
 
   const fresh = allJobs.filter((j) => parsePostedOnDays(j.postedOn) < MAX_AGE_DAYS);
+  const inScope = fresh.filter((j) => isInScope(j.locationsText ?? ""));
 
-  const MULTI_LOC = /^\d+\s+locations$/i;
-  const needsHydration: WorkdayJob[] = [];
-  const passThrough: WorkdayJob[] = [];
-  for (const j of fresh) {
-    if (MULTI_LOC.test((j.locationsText ?? "").trim())) needsHydration.push(j);
-    else passThrough.push(j);
+  // Pre-classify on title alone (location passed for the disqualifier).
+  // Survivors get per-job hydration; the rest pass through unhydrated
+  // so locationMatchCount stays accurate and they show up as filtered
+  // in the post-classify pipeline.
+  const candidatePaths = new Set<string>();
+  for (const j of inScope) {
+    const loc = j.locationsText ?? "";
+    const level = classifyRole(j.title, target.sector ?? "tech", loc, vocab);
+    if (level !== null) candidatePaths.add(j.externalPath);
   }
-  const hydrated = await Promise.all(
-    needsHydration.map(async (j) => {
-      const resolved = await fetchJobLocations(target.slug, j.externalPath);
-      return { ...j, locationsText: resolved ?? j.locationsText };
+
+  const detailEntries = await Promise.all(
+    [...candidatePaths].map(async (externalPath) => {
+      const d = await fetchJobDetail(target.slug, externalPath);
+      return [externalPath, d] as const;
     }),
   );
+  const detailMap = new Map(detailEntries);
 
-  const rawJobs = [...passThrough, ...hydrated].map((j) => ({
-    id: j.externalPath,
-    title: j.title,
-    location: j.locationsText ?? "",
-  }));
+  const rawJobs: RawJob[] = inScope.map((j) => {
+    const d = detailMap.get(j.externalPath);
+    return {
+      id: j.externalPath,
+      title: j.title,
+      location: d?.location ?? j.locationsText ?? "",
+      description: d?.description ?? undefined,
+    };
+  });
 
   return buildCompanyResult({
     target,

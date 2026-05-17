@@ -721,7 +721,7 @@ export async function scoreUnscoredEligibleFromDb(opts: {
     .where(
       and(
         eq(matches.pendingBvVerification, true),
-        inArray(matches.ats, ["greenhouse", "ashby", "lever"]),
+        inArray(matches.ats, ["greenhouse", "ashby", "lever", "workday"]),
         ne(matches.status, "dismissed"),
         isNull(matches.closedAt),
       ),
@@ -742,7 +742,7 @@ export async function scoreUnscoredEligibleFromDb(opts: {
         isNull(matches.tier1Score),
         isNull(matches.fitScore),
         inArray(matches.level, ["BV", "HIGH", "MEDIUM"]),
-        inArray(matches.ats, ["greenhouse", "ashby", "lever"]),
+        inArray(matches.ats, ["greenhouse", "ashby", "lever", "workday"]),
         ne(matches.status, "dismissed"),
         isNull(matches.closedAt),
       ),
@@ -827,8 +827,9 @@ export async function scoreUnscoredEligibleFromDb(opts: {
       continue;
     }
 
-    // Need the JD for the snippet. Workday is excluded by the SQL
-    // filter so this should always succeed for desc-capable ATSs.
+    // Need the JD for the snippet. All four supported ATSs now expose
+    // a description path (Workday via per-job endpoint), so fetch
+    // failure means the role is gone or the ATS is down.
     const rawDesc = await fetchDescription(m.ats, m.companySlug, m.jobId);
     if (!rawDesc) {
       skipped++;
