@@ -119,14 +119,17 @@ export async function scanWorkdayCompany(
   const fresh = allJobs.filter((j) => parsePostedOnDays(j.postedOn) < MAX_AGE_DAYS);
   const inScope = fresh.filter((j) => isInScope(j.locationsText ?? ""));
 
-  // Pre-classify on title alone (location passed for the disqualifier).
-  // Survivors get per-job hydration; the rest pass through unhydrated
-  // so locationMatchCount stays accurate and they show up as filtered
-  // in the post-classify pipeline.
+  // Pre-classify on title in PERMISSIVE mode — anything that passes
+  // every hard-skip filter (engineering, recruiter, finserv non-GTM,
+  // sub-target seniority) survives, even if no positive domain pattern
+  // matches. Survivors get per-job hydration so applyDescriptionShift +
+  // AI triage can see the JD. The rest (hard-skip rejects) pass through
+  // unhydrated and drop out at the buildCompanyResult re-classify step
+  // (which runs in the same permissive mode → same outcome).
   const candidatePaths = new Set<string>();
   for (const j of inScope) {
     const loc = j.locationsText ?? "";
-    const level = classifyRole(j.title, target.sector ?? "tech", loc, vocab);
+    const level = classifyRole(j.title, target.sector ?? "tech", loc, vocab, true);
     if (level !== null) candidatePaths.add(j.externalPath);
   }
 
@@ -156,5 +159,6 @@ export async function scanWorkdayCompany(
     priorIds,
     isBaseline,
     vocab,
+    permissive: true,
   });
 }

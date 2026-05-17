@@ -230,11 +230,21 @@ const GTM_TOKENS = ["sales", "gtm", "revenue"];
 // Top-level entry point. Dispatches on sector. Personal vocab
 // (healthcare_skips, bv_phrases) is passed in by the caller — see the
 // run.ts / core.ts call chain.
+//
+// `permissive`: when true, roles that pass every hard-skip filter but
+// don't match a positive HIGH/MED/LOW domain pattern default to MEDIUM
+// (instead of null). Used by the Workday adapter where the cheap
+// title-only classifier is too narrow — Haiku will triage everything
+// in-scope and Sonnet escalates the keepers. Hard-skip filters
+// (engineering, recruiter, healthcare, location, sub-target seniority,
+// finserv non-GTM/tech) still apply so we don't burn AI calls on obvious
+// noise.
 export function classifyRole(
   title: string,
   sector: Sector,
   location: string | undefined,
   vocab: ClassifierVocab,
+  permissive = false,
 ): Level | null {
   const n = normalizeTitle(title);
   for (const w of UNIVERSAL_HARD_SKIPS) {
@@ -246,11 +256,15 @@ export function classifyRole(
   }
   if (location && isLocationDisqualified(location)) return null;
   return sector === "finserv"
-    ? classifyRoleFinserv(title, vocab)
-    : classifyRoleTech(title, vocab);
+    ? classifyRoleFinserv(title, vocab, permissive)
+    : classifyRoleTech(title, vocab, permissive);
 }
 
-function classifyRoleTech(title: string, vocab: ClassifierVocab): Level | null {
+function classifyRoleTech(
+  title: string,
+  vocab: ClassifierVocab,
+  permissive: boolean,
+): Level | null {
   const n = normalizeTitle(title);
 
   if (hitsEngineeringSkip(n)) return null;
@@ -266,7 +280,7 @@ function classifyRoleTech(title: string, vocab: ClassifierVocab): Level | null {
   if (MEDIUM_PHRASES.some((p) => hasKeyword(n, p))) return "MEDIUM";
   if (hasGtmToken && SENIORITY_MED.some((s) => hasKeyword(n, s))) return "MEDIUM";
   if (LOW_KEYWORDS.some((w) => hasKeyword(n, w))) return "LOW";
-  return null;
+  return permissive ? "MEDIUM" : null;
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -290,9 +304,14 @@ const FINSERV_NONGTM_SKIPS = [
   "branch",
 ];
 
+// AVP / Assistant VP intentionally NOT here. At banks (JPM, Citi, BoA)
+// AVP is a junior post-MBA tier, but at exchanges, fintechs, and SaaS
+// finserv (Nasdaq, Mastercard, Capital One) AVP commonly designates a
+// senior individual-contributor leadership role (e.g. "AVP, Enterprise
+// Solutions AI Leader"). We accept AVP into the AI triage pool and let
+// Haiku/Sonnet read the JD to decide.
 const FINSERV_STANDALONE_SKIPS = [
   "associate", "analyst",
-  "assistant vp", "avp",
 ];
 
 const FINSERV_HIGH_HEAD_DOMAINS = [
@@ -328,7 +347,11 @@ const FINSERV_HIGH_CHIEF_PHRASES = [
 // vocab is currently unused in finserv path — finserv-specific BV
 // phrases aren't supported separately from the tech path's BV match.
 // Signature accepts it so the dispatcher stays clean.
-function classifyRoleFinserv(title: string, _vocab: ClassifierVocab): Level | null {
+function classifyRoleFinserv(
+  title: string,
+  _vocab: ClassifierVocab,
+  permissive: boolean,
+): Level | null {
   const n = normalizeTitle(title);
 
   if (hitsEngineeringSkip(n)) return null;
@@ -368,10 +391,14 @@ function classifyRoleFinserv(title: string, _vocab: ClassifierVocab): Level | nu
     FINSERV_MED_VP_DOMAINS.some((d) => hasKeyword(n, d))
   ) return "MEDIUM";
 
+  // AVP-titled finserv roles default to MEDIUM and rely on AI triage to
+  // separate exchange/fintech AVP-leaders from bank AVP-juniors.
+  if (hasKeyword(n, "avp")) return "MEDIUM";
+
   if (hasKeyword(n, "managing director")) return "LOW";
   if (hasKeyword(n, "vp")) return "LOW";
 
-  return null;
+  return permissive ? "MEDIUM" : null;
 }
 
 // ──────────────────────────────────────────────────────────────────────

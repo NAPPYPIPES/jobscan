@@ -26,14 +26,35 @@ export function buildCompanyResult(args: {
   priorIds: Set<string> | undefined;
   isBaseline: boolean;
   vocab: LoadedPersonalKeywords;
+  // When true, roles that pass every hard-skip filter but don't match a
+  // positive HIGH/MED/LOW domain pattern default to MEDIUM (instead of
+  // being dropped). Used by the Workday adapter so descriptions get
+  // hydrated and AI triage runs on the broader candidate set. See
+  // classifyRole for the full semantics.
+  permissive?: boolean;
 }): CompanyResult {
-  const { target, scannedAt, totalJobs, rawJobs, priorIds, isBaseline, vocab } = args;
+  const {
+    target,
+    scannedAt,
+    totalJobs,
+    rawJobs,
+    priorIds,
+    isBaseline,
+    vocab,
+    permissive = false,
+  } = args;
 
   const locationMatches = rawJobs.filter((j) => isInScope(j.location));
 
   const classified = locationMatches
     .map((j) => {
-      const titleLevel = classifyRole(j.title, target.sector ?? "tech", j.location, vocab);
+      const titleLevel = classifyRole(
+        j.title,
+        target.sector ?? "tech",
+        j.location,
+        vocab,
+        permissive,
+      );
       if (titleLevel === null) return { j, level: null };
       // Apply description signal shift if the adapter provided a
       // description (Greenhouse / Ashby / Lever do; Workday doesn't).
