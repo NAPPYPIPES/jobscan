@@ -13,6 +13,7 @@ import TargetsTable, { type TargetRow } from "./targets-table";
 import { ScoringCapsEditor } from "./scoring-caps-editor";
 import { getScoringCaps } from "@/db/scoring-caps";
 import { checkSpend } from "@/lib/fit/spendCaps";
+import { longDate, shortDate } from "@/lib/format/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -22,27 +23,6 @@ const ATS_LABEL: Record<string, string> = {
   lever: "Lever",
   workday: "Workday",
 };
-
-function shortDate(d: Date | null | undefined): string {
-  if (!d) return "—";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(d));
-}
-
-function longDate(d: Date | null | undefined): string {
-  if (!d) return "—";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(new Date(d));
-}
 
 export default async function Docs() {
   const db = getDb();

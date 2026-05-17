@@ -31,7 +31,7 @@ loadEnv({ path: ".env.local" });
 import { and, desc, inArray, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { matches } from "../db/schema";
-import { LEVEL_ORDER, type Level, type Sector } from "../lib/scan/types";
+import { ALL_ATSES, LEVEL_ORDER, type Level, type Sector } from "../lib/scan/types";
 import { sectorForSlug } from "../db/targets";
 import {
   extractScoringText,
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
       and(
         ne(matches.status, "dismissed"),
         isNull(matches.closedAt),
-        inArray(matches.ats, ["greenhouse", "ashby", "lever"]),
+        inArray(matches.ats, ALL_ATSES),
       ),
     )
     .orderBy(desc(matches.firstSeen));

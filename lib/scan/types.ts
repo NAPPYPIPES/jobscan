@@ -3,6 +3,11 @@
 // these concepts — the DB just persists them.
 
 export type Ats = "greenhouse" | "ashby" | "lever" | "workday";
+
+// Canonical ATS list. Use this constant whenever a query needs to filter
+// on "all currently-supported ATSs" — adding a fifth ATS only requires
+// updating the type + this constant, not grepping every inArray() call.
+export const ALL_ATSES: Ats[] = ["greenhouse", "ashby", "lever", "workday"];
 export type Level = "BV" | "HIGH" | "MEDIUM" | "LOW";
 
 // "tech" (default) classifies titles using Silicon-Valley conventions

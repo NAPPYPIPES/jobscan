@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { and, desc, eq, gte, inArray, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { apiUsage, companies, matches } from "@/db/schema";
-import { LEVEL_ORDER, type Level, type Sector } from "@/lib/scan/types";
+import { ALL_ATSES, LEVEL_ORDER, type Level, type Sector } from "@/lib/scan/types";
 import { sectorForSlug } from "@/db/targets";
 import { extractScoringText, fetchDescription } from "./fetch-description";
 import { DEFAULT_RUBRIC, formatRubricForPrompt, type ScoringRubric } from "./rubric";
@@ -721,7 +721,7 @@ export async function scoreUnscoredEligibleFromDb(opts: {
     .where(
       and(
         eq(matches.pendingBvVerification, true),
-        inArray(matches.ats, ["greenhouse", "ashby", "lever", "workday"]),
+        inArray(matches.ats, ALL_ATSES),
         ne(matches.status, "dismissed"),
         isNull(matches.closedAt),
       ),
@@ -742,7 +742,7 @@ export async function scoreUnscoredEligibleFromDb(opts: {
         isNull(matches.tier1Score),
         isNull(matches.fitScore),
         inArray(matches.level, ["BV", "HIGH", "MEDIUM"]),
-        inArray(matches.ats, ["greenhouse", "ashby", "lever", "workday"]),
+        inArray(matches.ats, ALL_ATSES),
         ne(matches.status, "dismissed"),
         isNull(matches.closedAt),
       ),
