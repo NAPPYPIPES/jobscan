@@ -5,21 +5,22 @@ import CompanySearch, { type CompanyOption } from "./company-search";
 
 export type Since = "24h" | "48h" | "72h";
 
-// Sort modes for the company-group ordering.
-//   activity — most-roles-first
-//   alpha    — A→Z by company name
-//   level    — companies whose best role is BV first, then HIGH, etc.
-//   score    — companies whose highest fit_score is best first; unscored
-//              rows fall back to a level-derived synthetic score in
-//              MatchesView so they don't trail dead-last
-export const ALL_SORTS = ["activity", "alpha", "level", "score"] as const;
+// Sort modes.
+//   score    — flat list, best fit_score first (default — primary view
+//              for "what should I look at?"). Unscored rows fall back
+//              to a level-derived synthetic score in MatchesView so
+//              they don't trail dead-last.
+//   activity — group by company, most-roles-first (alternative for
+//              browsing a target's full board).
+// alpha + level were dropped in the "best practice defaults" reset:
+//   alpha is reachable via the company search box; level is strictly
+//   redundant with score (level is just bucketed fit_score).
+export const ALL_SORTS = ["score", "activity"] as const;
 export type Sort = (typeof ALL_SORTS)[number];
 
 const SORT_OPTIONS: { value: Sort; label: string; title: string }[] = [
-  { value: "activity", label: "Activity", title: "Most-active companies first" },
-  { value: "alpha", label: "A–Z", title: "Companies alphabetical" },
-  { value: "level", label: "Level", title: "Companies with best level first (BV → HIGH → MED → LOW)" },
-  { value: "score", label: "Score", title: "Companies with best fit score first" },
+  { value: "score", label: "Best fit", title: "Highest fit_score first (flat list)" },
+  { value: "activity", label: "By company", title: "Group by company, most-active first" },
 ];
 
 const LEVELS: Level[] = ["BV", "HIGH", "MEDIUM", "LOW"];

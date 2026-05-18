@@ -19,7 +19,10 @@ function makeSectorLookup(map: Record<string, Sector>) {
 }
 
 const ALL_LEVELS: Level[] = ["BV", "HIGH", "MEDIUM", "LOW"];
-const LEVEL_RANK: Record<Level, number> = { BV: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+// Best-practice default: hide LOW noise. BV/HIGH/MEDIUM are the
+// actionable levels (MEDIUM with fit_score ≥ alertThreshold goes into
+// the daily digest). LOW chip stays visible so the user can opt in.
+const DEFAULT_LEVELS: Level[] = ["BV", "HIGH", "MEDIUM"];
 const ALL_SECTORS: Sector[] = ["tech", "finserv", "other"];
 const SINCE_HOURS: Record<Since, number> = { "24h": 24, "48h": 48, "72h": 72 };
 
@@ -56,7 +59,7 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
   const params = useSearchParams();
   const sectorForSlug = makeSectorLookup(sectorBySlug);
 
-  const defaultLevels = useMemo<Set<Level>>(() => new Set(ALL_LEVELS), []);
+  const defaultLevels = useMemo<Set<Level>>(() => new Set(DEFAULT_LEVELS), []);
 
   const levelsParam = params.get("levels");
   const explicitLevels = useMemo<Set<Level> | null>(() => {
@@ -76,7 +79,7 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
 
   const sort: Sort = (() => {
     const v = params.get("sort");
-    return ALL_SORTS.includes(v as Sort) ? (v as Sort) : "activity";
+    return ALL_SORTS.includes(v as Sort) ? (v as Sort) : "score";
   })();
 
   const sectorsParam = params.get("sectors");
@@ -106,14 +109,23 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
   };
 
   const onToggleLevel = (level: Level) => {
-    if (explicitLevels === null) {
-      setParam("levels", level);
-      return;
-    }
-    const next = new Set(explicitLevels);
+    // Toggle from the *currently-visible* set (defaultLevels when no
+    // explicit override yet) so clicking a visible chip deselects it
+    // and clicking a hidden chip selects it — matches what the user
+    // sees on screen, regardless of how the URL got there.
+    const next = new Set(selectedLevels);
     if (next.has(level)) next.delete(level);
     else next.add(level);
     if (next.size === 0) {
+      setParam("levels", null);
+      return;
+    }
+    // Clean URL: if the new set matches the default exactly, drop the
+    // levels param entirely so the URL doesn't carry redundant state.
+    const matchesDefault =
+      next.size === defaultLevels.size &&
+      Array.from(defaultLevels).every((l) => next.has(l));
+    if (matchesDefault) {
       setParam("levels", null);
       return;
     }
@@ -121,7 +133,7 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
   };
 
   const onChangeSort = (s: Sort) => {
-    setParam("sort", s === "activity" ? null : s);
+    setParam("sort", s === "score" ? null : s);
   };
 
   const onChangeSince = (s: Since) => {
@@ -246,21 +258,13 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
     }
 
     groups.sort((a, b) => {
-      if (sort === "alpha") {
-        return a.displayName.localeCompare(b.displayName);
-      }
-      if (sort === "level") {
-        const aBest = Math.min(...a.matches.map((m) => LEVEL_RANK[m.level]));
-        const bBest = Math.min(...b.matches.map((m) => LEVEL_RANK[m.level]));
-        if (aBest !== bBest) return aBest - bBest;
-        return a.displayName.localeCompare(b.displayName);
-      }
       if (sort === "score") {
         const aBest = Math.max(...a.matches.map(effectiveScore));
         const bBest = Math.max(...b.matches.map(effectiveScore));
         if (aBest !== bBest) return bBest - aBest;
         return a.displayName.localeCompare(b.displayName);
       }
+      // sort === "activity": most-roles-first, alpha tie-break.
       if (b.matches.length !== a.matches.length) {
         return b.matches.length - a.matches.length;
       }
