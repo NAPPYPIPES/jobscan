@@ -255,7 +255,7 @@ FLAG RULES — set exactly one
     (c) The role requires international relocation (UK, Germany, Singapore, India, EMEA broadly, APAC, etc.).
    HARD: forces level_recommendation = LOW and composite = 0.
 - "level_mismatch": role is below the candidate's target seniority. Set this WHENEVER the title contains any of:
-    - "Analyst" at any level (Senior Analyst, Principal Analyst, Strategic Analyst, GTM Analyst, Sales Strategy Analyst, etc.) — even Principal Analyst is IC analytical work, NOT a leadership role for this candidate.
+    - "Analyst" at any level (Senior Analyst, Principal Analyst, Strategic Analyst, GTM Analyst, Sales Strategy Analyst, etc.) — even Principal Analyst is IC analytical work, NOT a leadership role for this candidate. The "Senior" prefix on an IC analytical title does NOT constitute a leadership modifier; a leadership modifier requires explicit team-management language or a Manager / Director / VP / Head / Principal-of-a-function suffix (not "Principal Analyst", which is still IC). A Sales Strategy Analyst at Salesforce or any tier-1 employer still trips this flag — brand prestige does not override.
     - "Representative" / "Rep" (Sales Rep, Account Rep, Partner Development Representative, etc.).
     - "Coordinator", "Associate" (any level), "Junior" / "Jr.", "Specialist" without a Director/VP/Head leadership modifier, "Intern", "Fellow", "Apprentice", "Entry-level", "Mid-level IC".
     - YOE requirement of 0-3 years.
@@ -280,7 +280,7 @@ This overrides the score→level mapping. Use these explicit rules:
 
 BV — assign ONLY if:
   (a) the title contains explicit business-value function words (Business Value / Value Consulting / Value Engineering / Value Realization / Value Advisory / Value Architecture / Value Services), AND
-  (b) seniority is Director-and-above OR staff-IC equivalent (Principal / Staff / Lead / Senior Principal).
+  (b) seniority is Director-and-above OR staff-IC equivalent (Staff / Principal / Distinguished / Lead / Senior Principal). A plain "Senior" prefix (e.g. "Senior Value Engineer", "Senior Value Consultant") does NOT clear the staff-IC bar — those roles are HIGH, not BV.
   Do NOT inflate other strong-fit roles to BV — they are HIGH instead. When in doubt about title fit for BV, assign HIGH. BV is rare by design.
 
 HIGH — strong alignment across function + seniority + industry, AND the JD's required skills clearly map to the candidate's resume. Use HIGH whenever:
@@ -325,21 +325,39 @@ under-score the role. Apply these BV-specific overrides:
   seniority: Use this BV-specific scale, NOT the generic rubric scale.
              The candidate considers staff-IC at top AI/SaaS companies
              to be at-target seniority — those companies use IC-track
-             titles (Principal, Staff, Lead, "Value Engineer") for
-             roles that other companies would title Director. Score
+             titles (Staff, Principal, Distinguished, Lead) for roles
+             that other companies would title Director. Score
              accordingly:
-                 10  Senior Director / VP / Head of BV at any company,
-                     OR staff-IC titles ("Value Engineer", "Senior
-                     Value Engineer", "Principal Value Advisor",
-                     "Business Value Consultant") at top-tier AI,
-                     SaaS, or fintech companies (OpenAI, Anthropic,
+                 10  Director / Senior Director / VP / Head of BV
+                     practice at any company,
+                     OR a STAFF-IC-tier BV title at a top-tier AI,
+                     SaaS, or fintech company. Staff-IC tier requires
+                     one of: "Staff", "Principal", "Distinguished",
+                     "Lead", "Senior Principal" prefix (e.g. "Staff
+                     Value Engineer", "Principal Value Consultant",
+                     "Distinguished Value Architect", "Lead Value
+                     Engineer"). Top-tier list: OpenAI, Anthropic,
                      Databricks, Glean, Cursor, Sierra, Decagon,
                      Stripe, MongoDB, Snowflake, Cohere, Mistral,
-                     Twilio, Plaid, Brex, etc).
-                  9  "Value Consultant" or "Value Engineer" titles at
-                     companies further from the top-tier AI/SaaS
+                     Twilio, Plaid, Brex, etc.
+                     IMPORTANT: a plain "Senior" prefix is NOT
+                     staff-IC. "Senior Value Engineer" / "Senior
+                     Value Consultant" map to 9, not 10 — the
+                     candidate is past the senior-IC band and targets
+                     either Director+ or true staff-track titles.
+                  9  Plain "Value Engineer" / "Senior Value Engineer"
+                     / "Value Consultant" / "Senior Value Consultant"
+                     at any top-tier company (one band below the
+                     candidate's target — IC level with no staff-track
+                     signal), OR "Value Consultant" / "Value Engineer"
+                     at companies further from the top-tier AI/SaaS
                      cluster, OR Manager-of-Value-Consultants at any
-                     company.
+                     company. NOTE: when seniority for a BV-titled
+                     role lands at 9 because of the Senior-only IC
+                     pattern above, prefer level_recommendation = HIGH
+                     over BV unless the role has other strong staff-IC
+                     signals in the JD (scope, headcount under, deal
+                     size). BV is reserved for at-target seniority.
                   8  Senior Manager of a small Value team.
                   7  Manager-level Value Consultant (under target —
                      usually downgrade to HIGH not BV).
@@ -371,22 +389,26 @@ at 9.9, because by definition it isn't the literal prior job.
 
 Calibration examples (target overall scores):
   - "Senior Director, BVS, FinServ" at Salesforce (literal prior job) → 10.0
-  - "Value Engineer, AI Success - NYC" at OpenAI                      → 9.9 (basically the same job; AI-native; NYC)
-  - "Business Value Consultant, Financial Services" at Databricks     → 9.9 (same vertical + BV title at a top AI infra co)
-  - "Business Value Consultant" at Glean                              → 9.7 (BV title at strong AI infra co; minor industry softness)
-  - "Business Value Consultant" at Decagon                            → 9.6 (BV title at AI-native scale-up)
-  - "Senior Value Engineer" at Twilio                                 → 9.3 (BV title, AI-adjacent but enterprise comm not AI-native)
+  - "Staff Value Engineer, AI Success - NYC" at OpenAI                → 9.9 (basically the same job; AI-native; NYC; staff-IC tier)
+  - "Principal Value Consultant, Financial Services" at Databricks    → 9.9 (same vertical + BV title at top AI infra co; staff-IC)
+  - "Business Value Consultant" at Glean (no staff prefix)            → assign HIGH at ~8.6 — title matches BV but seniority lands at 9 without a staff/principal/lead prefix; HIGH not BV per the seniority rule above
+  - "Director, Business Value Consulting" at Glean                    → 9.7 (BV title + Director seniority)
+  - "Senior Value Engineer" at Twilio                                 → assign HIGH at ~8.7 (NOT BV) — "Senior" alone is below the staff-IC bar; the candidate is past senior-IC tier
+  - "Staff Value Engineer" at Twilio                                  → 9.4 (BV-eligible; true staff-IC; AI-adjacent industry softness)
   - "Director of Value Engineering" at MongoDB                        → 9.7
   - "Value Consultant" at Manager level at any company                → NOT BV → assign HIGH
-  - "Value Engineer" at a healthcare-vertical company                 → BV but flag healthcare_excluded, level LOW
+  - "Value Engineer" at a healthcare-vertical company                 → BV-titled but flag healthcare_excluded, level LOW
 
-Crucial: under the BV-specific seniority scale, "staff-IC at a top AI
-or enterprise SaaS company" (Principal / Staff / Lead / Senior Principal /
-"Value Engineer" titled as IC) maps to seniority = 9, NOT 7. That's the
-candidate's exact target seniority band for BV practitioner roles.
-Director-of-BV-Practice = 10. Anything below Manager-of-Value-Consultants
-in a BV title is the role being under-leveled for the candidate, not the
-candidate being a fit for an under-leveled role.
+Crucial: under the BV-specific seniority scale, true STAFF-IC tier
+(Staff / Principal / Distinguished / Lead / Senior Principal prefix) at
+a top AI or enterprise SaaS company maps to seniority = 10. That's the
+candidate's at-target seniority band for IC-track BV practitioner roles
+— equivalent to Director seniority on the management track. Plain
+"Senior Value Engineer" / "Senior Value Consultant" without a staff-
+track prefix maps to seniority = 9 and should typically be assigned
+level_recommendation = HIGH (not BV), because the candidate is past
+senior-IC tier. The generic rubric's "VP/SVP = 10, Director = 7" anchor
+does not apply here.
 
 ================================================================
 OUTPUT
