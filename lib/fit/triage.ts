@@ -209,6 +209,7 @@ Return this JSON exactly. No other text. No markdown fences.
 }`;
 
 export async function triageRoleWithHaiku(args: {
+  userId: string;
   title: string;
   company: string;
   companySlug: string;
@@ -219,9 +220,10 @@ export async function triageRoleWithHaiku(args: {
   if (!apiKey) return { ok: false, reason: "missing_key" };
 
   // Resume is required — without it Tier-1 can't score "fit" meaningfully.
-  // Fresh installs without ingest-resume should not run triage; the
-  // caller (lib/scan/run.ts) can fall back to the keyword classifier.
-  const resumeMd = await getRawResume();
+  // Per-user: each user's resume is parsed into user_profile during
+  // onboarding (scripts/ingest-resume.ts handles the maintainer's).
+  // No profile → caller can fall back to the keyword classifier.
+  const resumeMd = await getRawResume(args.userId);
   if (!resumeMd) return { ok: false, reason: "no_profile" };
 
   const client = new Anthropic({ apiKey });

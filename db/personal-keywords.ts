@@ -1,6 +1,7 @@
 import { desc, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import { personalKeywords } from "./schema";
+import { MAINTAINER_USER_ID } from "@/lib/auth/maintainer";
 
 // Classifier vocabulary loaded from DB. Regex fields are stored as
 // arrays of source strings (JSONB), compiled to RegExp here. A bad
@@ -88,20 +89,30 @@ export async function replacePersonalKeywords(row: {
   finservBonusPositivePatterns: string[];
 }): Promise<LoadedPersonalKeywords> {
   const db = getDb();
-  const inserted = await db
+  // Phase 2 stopgap: writes maintainer's user_id. With user_id UNIQUE,
+  // the upsert-then-prune pattern collapses into a single
+  // onConflict(user_id) doUpdate — no need to delete other rows.
+  // Phase 5 makes db/personal-keywords.ts take userId as a parameter.
+  await db
     .insert(personalKeywords)
     .values({
+      userId: MAINTAINER_USER_ID,
       bvPhrases: row.bvPhrases,
       healthcareSkips: row.healthcareSkips,
       hardCapLowPatterns: row.hardCapLowPatterns,
       finservBonusPositivePatterns: row.finservBonusPositivePatterns,
       updatedAt: sql`now()`,
     })
-    .returning({ id: personalKeywords.id });
-  const newId = inserted[0]?.id;
-  if (newId) {
-    await db.delete(personalKeywords).where(sql`id <> ${newId}`);
-  }
+    .onConflictDoUpdate({
+      target: personalKeywords.userId,
+      set: {
+        bvPhrases: row.bvPhrases,
+        healthcareSkips: row.healthcareSkips,
+        hardCapLowPatterns: row.hardCapLowPatterns,
+        finservBonusPositivePatterns: row.finservBonusPositivePatterns,
+        updatedAt: sql`now()`,
+      },
+    });
   cached = {
     bvPhrases: row.bvPhrases,
     healthcareSkips: row.healthcareSkips,

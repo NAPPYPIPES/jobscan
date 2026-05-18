@@ -12,20 +12,28 @@
     "validate-ats": "tsx scripts/validate-ats.ts",
     "populate-companies": "tsx scripts/populate-company-descriptions.ts",
     "migrate-rescore": "tsx scripts/migrate-rescore.ts",
-    "apply-migration-0002": "tsx scripts/apply-migration-0002.ts"
+    "apply-migration-0002": "tsx scripts/apply-migration-0002.ts",
+    "apply-migration-0003": "tsx scripts/apply-migration-0003.ts",
+    "apply-migration-0004": "tsx scripts/apply-migration-0004.ts",
+    "apply-migration-0005": "tsx scripts/apply-migration-0005.ts",
+    "apply-migration-0006": "tsx scripts/apply-migration-0006.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
+    "@auth/drizzle-adapter": "^1.11.2",
     "@neondatabase/serverless": "^1.1.0",
     "@vercel/analytics": "^2.0.1",
+    "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.2",
     "next": "^15.1.0",
+    "next-auth": "^5.0.0-beta.31",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "resend": "^6.12.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

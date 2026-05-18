@@ -1,7 +1,8 @@
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
 import { getActiveMatches } from "@/db/matches";
 import { getTargets } from "@/db/targets";
-import { getViewerRole } from "@/lib/auth/viewer";
+import { getViewerRole, getViewerUserId } from "@/lib/auth/viewer";
 import type { Sector } from "@/lib/scan/types";
 import { jobUrl } from "@/lib/scan/urls";
 import MatchesView from "./_components/matches-view";
@@ -11,9 +12,11 @@ import MatchesView from "./_components/matches-view";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
+  const userId = await getViewerUserId();
+  if (!userId) redirect("/login");
   const viewerRole = await getViewerRole();
   const [matches, targets] = await Promise.all([
-    getActiveMatches({ excludeApplied: true, excludeBaseline: true, role: viewerRole }),
+    getActiveMatches(userId, { excludeApplied: true, excludeBaseline: true }),
     getTargets({ role: viewerRole }),
   ]);
 

@@ -2,12 +2,14 @@ import { getPersonalKeywords, type LoadedPersonalKeywords } from "@/db/personal-
 import { getTargets, validateTargets } from "@/db/targets";
 import type { Target as TargetRow } from "@/db/schema";
 import { loadPriorIdsBySlug, persistScanResults } from "@/db/matches";
+import { fanOutToUserMatches } from "./fanout";
 import { scanAshbyCompany } from "./adapters/ashby";
 import { scanGreenhouseCompany } from "./adapters/greenhouse";
 import { scanLeverCompany } from "./adapters/lever";
 import { scanWorkdayCompany } from "./adapters/workday";
 import { LEVEL_LABEL, type CompanyResult, type Level, type Target } from "./types";
 import { getScoringCaps } from "@/db/scoring-caps";
+import { MAINTAINER_USER_ID } from "@/lib/auth/maintainer";
 import { countNewJobsToday, countNewJobsTodayForCompany } from "./dayCaps";
 
 export type RunSummary = {
@@ -49,7 +51,10 @@ async function applyPerDayCaps(
   results: CompanyResult[],
   baselineSlugs: Set<string>,
 ): Promise<void> {
-  const caps = await getScoringCaps();
+  // perDayCaps are GLOBAL scan-throughput limits (not per-user), so
+  // we read them from the maintainer's scoring_caps row — the
+  // authoritative source for global classifier/scanner knobs.
+  const caps = await getScoringCaps(MAINTAINER_USER_ID);
   const globalCap = caps.perDayCaps.maxNewJobsPerDay;
   const companyCap = caps.perDayCaps.maxNewJobsPerCompanyPerDay;
   const todayGlobal = await countNewJobsToday();
@@ -244,6 +249,15 @@ export async function runScanAndPersist(): Promise<RunSummary> {
   await applyPerDayCaps(results, baselineSlugs);
 
   await persistScanResults(results, baselineSlugs);
+
+  // Phase 4: after global matches are persisted, fan out any newly-
+  // inserted rows into per-user user_matches for every subscriber via
+  // user_targets. Idempotent — only inserts (user_id, match_id) pairs
+  // that don't already exist, so running this every scan is fine.
+  const fanout = await fanOutToUserMatches();
+  if (fanout.inserted > 0) {
+    console.log(`[scan] fanned out ${fanout.inserted} new user_matches rows`);
+  }
 
   return {
     timestamp,

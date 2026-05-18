@@ -1,15 +1,54 @@
 import { and, desc, eq, gte, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { getDb } from "./client";
-import { matches, targets } from "./schema";
+import { matches, targets, userMatches } from "./schema";
 import { LEVEL_ORDER, type CompanyResult } from "@/lib/scan/types";
-import type { Match, MatchStatus } from "./schema";
-import { DEMO_SLUGS_ARRAY } from "@/lib/auth/demo-allowlist";
-import type { Role } from "@/lib/auth/cookie";
+import type { Match, MatchStatus, DismissReason } from "./schema";
+
+// Phase 4: every read returns per-user state by JOINing matches (the
+// global one-row-per-real-job catalog) against user_matches (the
+// per-(user, match) state table). The shape returned mirrors the
+// legacy Match type so existing UI components keep working — fields
+// that used to live on matches.* (status, fit_score, level, etc.)
+// are sourced from user_matches and merged into the returned object.
+
+// Convenience: the columns we project from a JOINed select so the
+// returned shape exactly matches the legacy Match (lots of UI code
+// references match.status, match.fitScore, etc.).
+const joinedSelect = {
+  // Global columns from matches.*
+  id: matches.id,
+  ats: matches.ats,
+  companySlug: matches.companySlug,
+  companyDisplayName: matches.companyDisplayName,
+  jobId: matches.jobId,
+  title: matches.title,
+  location: matches.location,
+  firstSeen: matches.firstSeen,
+  lastSeen: matches.lastSeen,
+  closedAt: matches.closedAt,
+  createdAt: matches.createdAt,
+  // Per-user columns from user_matches.*
+  level: userMatches.level,
+  status: userMatches.status,
+  isBaseline: userMatches.isBaseline,
+  appliedAt: userMatches.appliedAt,
+  dismissedAt: userMatches.dismissedAt,
+  dismissReason: userMatches.dismissReason,
+  fitScore: userMatches.fitScore,
+  fitSummary: userMatches.fitSummary,
+  fitFlag: userMatches.fitFlag,
+  tier1Score: userMatches.tier1Score,
+  tier1Confidence: userMatches.tier1Confidence,
+  tier1IsPotentialBv: userMatches.tier1IsPotentialBv,
+  tier1QuickTake: userMatches.tier1QuickTake,
+  pendingBvVerification: userMatches.pendingBvVerification,
+  bvReasoning: userMatches.bvReasoning,
+  updatedAt: userMatches.updatedAt,
+};
 
 // Read all non-dismissed matches for the UI. Sorted by level rank (BV →
 // LOW), then first_seen DESC within each level, so the highest-priority
-// and most-recently-discovered roles surface first. Array.sort is stable,
-// so the SQL ORDER BY first_seen DESC is preserved within level groups.
+// and most-recently-discovered roles surface first.
 //
 // `excludeApplied`: Recent (/) hides applied roles entirely so the view
 // stays a to-do list. /all keeps them (the UI fades them in place).
@@ -17,44 +56,46 @@ import type { Role } from "@/lib/auth/cookie";
 // `excludeBaseline`: Recent (/) needs to drop is_baseline=true rows.
 // Those rows are first-scan-of-a-newly-added-company carry-over and would
 // otherwise pollute the 24h window with hundreds of rows.
+//
+// `userId`: scope to the signed-in user's user_matches rows. Demo
+// user sees their own pre-seeded curated subset.
 export async function getActiveMatches(
+  userId: string,
   opts: {
     excludeApplied?: boolean;
     excludeBaseline?: boolean;
-    // Demo viewers see only the curated subset of slugs. Owner mode
-    // (default) sees all 133. The DB stores rows for every company
-    // — filtering is purely at read time.
-    role?: Role;
   } = {},
 ): Promise<Match[]> {
   const db = getDb();
-  // closed_at IS NULL is the new default — closed rows (scanner saw
-  // them lapse from the ATS) shouldn't appear in /all or /. The
-  // analytics "Likely closed" widget reads closed_at IS NOT NULL
-  // directly; nothing else should need to opt back in.
-  const conditions = [ne(matches.status, "dismissed"), isNull(matches.closedAt)];
-  if (opts.excludeApplied) conditions.push(ne(matches.status, "applied"));
-  if (opts.excludeBaseline) conditions.push(eq(matches.isBaseline, false));
-  if (opts.role === "demo") {
-    conditions.push(inArray(matches.companySlug, DEMO_SLUGS_ARRAY as string[]));
-  }
+  const conditions = [
+    eq(userMatches.userId, userId),
+    ne(userMatches.status, "dismissed"),
+    isNull(matches.closedAt),
+  ];
+  if (opts.excludeApplied) conditions.push(ne(userMatches.status, "applied"));
+  if (opts.excludeBaseline) conditions.push(eq(userMatches.isBaseline, false));
+
   const rows = await db
-    .select()
-    .from(matches)
+    .select(joinedSelect)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(and(...conditions))
     .orderBy(desc(matches.firstSeen));
-  return rows.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
+
+  return (rows as unknown as Match[]).sort(
+    (a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level],
+  );
 }
 
-// Write one row's status. Returns the row's new status on success, or
-// null if no row matched the id. Used by the PATCH /api/matches/[id]
-// route behind the per-card Applied toggle and × dismiss button.
+// Write one row's status. Returns the (userId, matchId) tuple on
+// success, or null if no row matched. Used by PATCH /api/matches/[id].
 //
 // applied_at is maintained alongside status: set to now() on transition
 // to 'applied', cleared on transition to 'new', untouched for other
 // statuses.
 export async function setMatchStatus(
-  id: string,
+  userId: string,
+  matchId: string,
   status: MatchStatus,
 ): Promise<{ id: string; status: string } | null> {
   const db = getDb();
@@ -64,39 +105,69 @@ export async function setMatchStatus(
   };
   if (status === "applied") setClause.appliedAt = sql`now()`;
   else if (status === "new") setClause.appliedAt = null;
+
   const updated = await db
-    .update(matches)
+    .update(userMatches)
     .set(setClause)
-    .where(eq(matches.id, id))
-    .returning({ id: matches.id, status: matches.status });
+    .where(and(eq(userMatches.userId, userId), eq(userMatches.matchId, matchId)))
+    .returning({ id: userMatches.matchId, status: userMatches.status });
   return updated[0] ?? null;
 }
 
-// Pull digest candidates: BV/HIGH/MEDIUM in the lookback window, dismissed
-// + baseline rows excluded. The actual alert decision happens in
-// shouldAlert (lib/fit/score.ts) — MEDIUM rows scoring above the
-// alertThreshold pass that filter even though they don't clear the HIGH
-// level band. Sort: BV first, HIGH next, MEDIUM last; newest within each.
-export async function getRecentAlertCandidates(since: Date): Promise<Match[]> {
+// Dismiss with optional reason tags. Distinct from setMatchStatus so
+// the dismiss-reason payload can be set in the same UPDATE without
+// every status mutation having to pass it.
+export async function dismissMatch(
+  userId: string,
+  matchId: string,
+  reasons: DismissReason[] | null,
+): Promise<boolean> {
+  const db = getDb();
+  const updated = await db
+    .update(userMatches)
+    .set({
+      status: "dismissed",
+      dismissedAt: sql`now()`,
+      dismissReason: reasons,
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(userMatches.userId, userId), eq(userMatches.matchId, matchId)))
+    .returning({ id: userMatches.matchId });
+  return updated.length > 0;
+}
+
+// Pull digest candidates for a single user: BV/HIGH/MEDIUM in the
+// lookback window, dismissed + baseline rows excluded. Phase 6 will
+// loop this per user across the digest cron.
+export async function getRecentAlertCandidates(
+  userId: string,
+  since: Date,
+): Promise<Match[]> {
   const db = getDb();
   const rows = await db
-    .select()
-    .from(matches)
+    .select(joinedSelect)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
+        eq(userMatches.userId, userId),
         gte(matches.firstSeen, since),
-        inArray(matches.level, ["BV", "HIGH", "MEDIUM"]),
-        ne(matches.status, "dismissed"),
-        eq(matches.isBaseline, false),
+        inArray(userMatches.level, ["BV", "HIGH", "MEDIUM"]),
+        ne(userMatches.status, "dismissed"),
+        eq(userMatches.isBaseline, false),
         isNull(matches.closedAt),
       ),
     )
     .orderBy(desc(matches.firstSeen));
-  return rows.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
+  return (rows as unknown as Match[]).sort(
+    (a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level],
+  );
 }
 
-// Return a per-slug set of job IDs currently in the DB. Feeds the diff
-// detector: any job ID not already in the set counts as new this run.
+// Return a per-slug set of job IDs currently in the GLOBAL matches
+// table. Feeds the scan's diff detector — net-new is global (the same
+// job posting is "new" for everyone the first time we see it), so
+// this stays scoped to matches and doesn't need to know about users.
 export async function loadPriorIdsBySlug(): Promise<Map<string, Set<string>>> {
   const db = getDb();
   const rows = await db
@@ -119,26 +190,17 @@ export async function loadPriorIdsBySlug(): Promise<Map<string, Set<string>>> {
 }
 
 // Upsert every match from a scan run AND actively close any prior row
-// for a successful slug whose jobId wasn't returned this run. Only
-// successful slugs (those present in `results`) trigger closure —
-// failed-fetch slugs are skipped entirely so a transient ATS outage
-// doesn't auto-close every match for that company.
+// for a successful slug whose jobId wasn't returned this run. UNCHANGED
+// from Phase 3 — writes are still to the global matches table. Per-user
+// fan-out happens AFTER this function returns; see lib/scan/run.ts.
 //
-// New rows get first_seen = last_seen = now (DB defaults). Existing
-// rows (same ats + slug + job_id) refresh last_seen + updated_at +
-// drifted fields AND clear closed_at (a re-appearing job ID means the
-// listing reopened — rare, but happens). The SET clause intentionally
-// omits first_seen + is_baseline so the discovery timestamp and the
-// baseline flag stay accurate to when the role was first detected.
+// Only successful slugs trigger closure — failed-fetch slugs are
+// skipped entirely so a transient ATS outage doesn't auto-close every
+// match for that company.
 //
 // `baselineSlugs` = slugs whose first-ever scan this is. Their rows
-// insert with is_baseline=true so they don't appear as "new" in the
-// digest. Rows for slugs already in DB insert with the default (false).
-//
-// After upsert + closure, writes targets.last_success_at = now() for
-// every successful slug. Brand-new targets that haven't yet scanned
-// once read as last_success_at IS NULL, distinguishable from "scanned
-// recently but currently failing."
+// insert with is_baseline=true on the global matches table; the
+// fan-out helper propagates that flag to user_matches.
 export async function persistScanResults(
   results: CompanyResult[],
   baselineSlugs: Set<string>,
@@ -168,31 +230,17 @@ export async function persistScanResults(
         set: {
           lastSeen: sql`now()`,
           updatedAt: sql`now()`,
-          // level intentionally NOT overwritten on conflict — classifier
-          // rule changes on in-flight rows would require an explicit
-          // reclassify; persistScore is the only thing that updates level
-          // (to the score-derived bucket).
           title: sql`excluded.title`,
           location: sql`excluded.location`,
           companyDisplayName: sql`excluded.company_display_name`,
-          // Reopen: if a previously-closed job ID reappears, the
-          // listing is back up. Clear the timestamp so the row drops
-          // out of the closed-roles widget and back into /all.
           closedAt: sql`NULL`,
         },
       });
   }
 
-  // Per-slug closure pass. For each successful slug, mark every
-  // currently-active match (closed_at IS NULL) whose job_id isn't in
-  // the just-scanned set as closed.
-  //
-  // The empty-jobs case (scan succeeded but returned zero jobs) is a
-  // legitimate "company has no postings right now" signal and all
-  // prior open rows for that slug should close. Drizzle's
-  // notInArray() returns FALSE for an empty array (it can't generate
-  // `NOT IN ()`), so we branch: no jobs ⇒ close all active rows; some
-  // jobs ⇒ close rows not in the set.
+  // Per-slug closure pass. Closures are GLOBAL — when a job leaves
+  // the ATS, it's closed for everyone. No per-user closure write is
+  // needed; the read path filters on matches.closed_at IS NULL.
   for (const r of results) {
     const currentJobIds = r.matches.map((m) => m.id);
     const baseFilter = and(
@@ -209,8 +257,6 @@ export async function persistScanResults(
       .where(where);
   }
 
-  // Stamp last_success_at on every target whose scan succeeded. One
-  // batched UPDATE — cheap even with 130+ slugs.
   if (successfulSlugs.length > 0) {
     await db
       .update(targets)

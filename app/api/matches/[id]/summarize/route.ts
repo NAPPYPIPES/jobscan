@@ -7,7 +7,8 @@ import { getCompanyDescription, getCurrentMonthSpend } from "@/lib/fit/score";
 import { CURRENT_PROMPT_VERSION, generateSummary } from "@/lib/fit/summary-prompt";
 import { sectorForSlug, stageForSlug } from "@/db/targets";
 import { getUserProfile } from "@/db/profile";
-import { requireOwner } from "@/lib/auth/viewer";
+import { getViewerUserId, requireOwner } from "@/lib/auth/viewer";
+import { MAINTAINER_USER_ID } from "@/lib/auth/maintainer";
 
 // Claude Haiku 4.5 takes 5-15s for a generate. Vercel Hobby defaults
 // to 10s for serverless functions, so the function gets killed mid-
@@ -45,10 +46,13 @@ async function handlePost(
   params: Promise<{ id: string }>,
 ) {
   // Hard block: every Claude call here costs real money on the
-  // owner's API key. Demo viewers must never be able to trigger one,
-  // even by hitting the route directly past the disabled UI button.
+  // requesting user's monthly cap. Demo viewers (cap=0) are blocked
+  // upstream by requireOwner; auth'd users are billed against their
+  // own user_extras.monthly_cap_usd.
   const denied = await requireOwner();
   if (denied) return denied;
+  const userId = await getViewerUserId();
+  if (!userId) return NextResponse.json({ error: "not signed in" }, { status: 401 });
 
   const { id } = await params;
   const url = new URL(req.url);
@@ -94,7 +98,11 @@ async function handlePost(
     }
   }
 
-  const spend = await getCurrentMonthSpend();
+  // Per-user monthly spend gate. HARD/SOFT constants are kept as
+  // legacy "global" guardrails for the maintainer's max-spend
+  // sanity check; the per-user cap from user_extras lives inside
+  // checkSpend / scoreFitWithClaude. Keep both — defence in depth.
+  const spend = await getCurrentMonthSpend(userId);
   if (spend >= HARD_CAP_USD) {
     return NextResponse.json(
       { error: "monthly cap reached, summaries paused" },
@@ -107,7 +115,8 @@ async function handlePost(
     );
   }
 
-  const profile = await getUserProfile();
+  // Per-user profile for the Haiku summarization prompt.
+  const profile = await getUserProfile(userId);
   const background = profile?.parsedSummary ??
     "(No candidate profile has been ingested yet — run `npm run ingest-resume`.)";
 
@@ -134,9 +143,15 @@ async function handlePost(
     return NextResponse.json({ error: out.reason }, { status });
   }
 
+  // Phase 2: write per-user IDs on summary cache + api_usage. Phase 5
+  // will swap roleSummaries PK to (user_id, match_id) so each user can
+  // generate their own resume-tailored summary; until then the PK is
+  // still match_id and a regenerate overwrites the prior user's entry.
+  const viewerUserId = (await getViewerUserId()) ?? MAINTAINER_USER_ID;
   await db
     .insert(roleSummaries)
     .values({
+      userId: viewerUserId,
       matchId: id,
       summary: out.result.summary,
       pros: out.result.pros,
@@ -149,6 +164,7 @@ async function handlePost(
     .onConflictDoUpdate({
       target: roleSummaries.matchId,
       set: {
+        userId: viewerUserId,
         summary: out.result.summary,
         pros: out.result.pros,
         cons: out.result.cons,
@@ -161,6 +177,7 @@ async function handlePost(
     });
 
   await db.insert(apiUsage).values({
+    userId: viewerUserId,
     matchId: id,
     tokensIn: out.tokensIn,
     tokensOut: out.tokensOut,

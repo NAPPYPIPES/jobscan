@@ -30,7 +30,7 @@ loadEnv({ path: ".env.local" });
 
 import { and, desc, inArray, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
-import { matches } from "../db/schema";
+import { matches, userMatches } from "../db/schema";
 import { ALL_ATSES, LEVEL_ORDER, type Level, type Sector } from "../lib/scan/types";
 import { sectorForSlug } from "../db/targets";
 import {
@@ -46,6 +46,7 @@ import {
 import { scoreFitWithClaude, persistScore } from "../lib/fit/score";
 import { getScoringCaps } from "../db/scoring-caps";
 import { apiUsage } from "../db/schema";
+import { MAINTAINER_USER_ID } from "../lib/auth/maintainer";
 import { eq } from "drizzle-orm";
 
 type Args = {
@@ -121,7 +122,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const caps = await getScoringCaps();
+  const caps = await getScoringCaps(MAINTAINER_USER_ID);
   let runSpend = 0;
   let triagedCount = 0;
   let escalatedCount = 0;
@@ -163,8 +164,10 @@ async function main(): Promise<void> {
     }
     const desc = extractScoringText(rawDesc);
 
-    // Tier-1.
+    // Tier-1. Maintainer-only script — pass MAINTAINER_USER_ID
+    // explicitly so the triage call reads the maintainer's resume.
     const triageOut = await triageRoleWithHaiku({
+      userId: MAINTAINER_USER_ID,
       title: m.title,
       company: m.companyDisplayName,
       companySlug: m.companySlug,
@@ -179,8 +182,10 @@ async function main(): Promise<void> {
     runSpend += triageOut.costUsd;
     triagedCount++;
 
-    // Log triage api_usage row.
+    // Log triage api_usage row. Maintainer-scoped — this script is a
+    // one-off rescore tool run by the maintainer only.
     await db.insert(apiUsage).values({
+      userId: MAINTAINER_USER_ID,
       matchId: m.id,
       tokensIn:
         triageOut.tokensIn + triageOut.cacheReadTokens + triageOut.cacheWriteTokens,
@@ -199,6 +204,7 @@ async function main(): Promise<void> {
 
       const sector: Sector = await sectorForSlug(m.companySlug);
       const sonnetOut = await scoreFitWithClaude({
+        userId: MAINTAINER_USER_ID,
         matchId: m.id,
         title: m.title,
         company: m.companyDisplayName,
@@ -219,6 +225,7 @@ async function main(): Promise<void> {
 
       const oldLevel = m.level;
       await persistScore(
+        MAINTAINER_USER_ID,
         m.id,
         sonnetOut.fit,
         sonnetOut.tokensIn,
@@ -248,10 +255,11 @@ async function main(): Promise<void> {
       }
     } else {
       // Not escalated. Persist Tier-1 only, cap level at MEDIUM.
+      // Phase 5: write to user_matches for the maintainer.
       const newLevel = levelFromTier1(triageOut.tier1.tier1_score);
       const oldLevel = m.level;
       await db
-        .update(matches)
+        .update(userMatches)
         .set({
           tier1Score: triageOut.tier1.tier1_score.toFixed(1),
           tier1Confidence: triageOut.tier1.confidence,
@@ -260,7 +268,9 @@ async function main(): Promise<void> {
           level: newLevel,
           updatedAt: sql`now()`,
         })
-        .where(eq(matches.id, m.id));
+        .where(
+          and(eq(userMatches.userId, MAINTAINER_USER_ID), eq(userMatches.matchId, m.id)),
+        );
       if (oldLevel !== newLevel) {
         changedLevelCount++;
         levelChanges.push({
@@ -297,9 +307,11 @@ async function main(): Promise<void> {
 }
 
 async function writeTier1(matchId: string, tier1: Tier1Result): Promise<void> {
+  // Phase 5: per-user fields moved to user_matches. Maintainer-only
+  // script, so we update the maintainer's row directly.
   const db = getDb();
   await db
-    .update(matches)
+    .update(userMatches)
     .set({
       tier1Score: tier1.tier1_score.toFixed(1),
       tier1Confidence: tier1.confidence,
@@ -307,7 +319,9 @@ async function writeTier1(matchId: string, tier1: Tier1Result): Promise<void> {
       tier1QuickTake: tier1.quick_take,
       updatedAt: sql`now()`,
     })
-    .where(eq(matches.id, matchId));
+    .where(
+      and(eq(userMatches.userId, MAINTAINER_USER_ID), eq(userMatches.matchId, matchId)),
+    );
 }
 
 main().catch((err) => {

@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { and, eq, isNotNull } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { userExtras } from "@/db/schema";
 import { getRecentAlertCandidates } from "@/db/matches";
 import { sendDigest, type AlertRow } from "@/lib/alerts/email";
 import { shouldAlert, type FitFlag } from "@/lib/fit/score";
@@ -7,11 +10,15 @@ import { jobUrl } from "@/lib/scan/urls";
 
 // Pure DB read + send — no scan triggered here. Hourly scans (cron
 // hitting /api/cron/scan) keep first_seen accurate. This endpoint
-// queries the last 48h and splits into a today (0-24h) and yesterday
-// (24-48h) section. Sends every day at whatever cadence the cron
-// hits this URL regardless of whether either section has matches —
-// reliable daily ping.
-export const maxDuration = 30;
+// queries the last 48h per user and splits into today (0-24h) +
+// yesterday (24-48h). Sends per user regardless of activity (reliable
+// daily ping).
+//
+// Phase 6: loops every onboarded user with digest_enabled=true. Per-
+// user candidate fetch + per-user send. Demo user has digest_enabled
+// =false (seeded by migration 0005) so they never receive an email
+// even if you accidentally bump their cap.
+export const maxDuration = 60;
 
 const HOUR_MS = 60 * 60 * 1000;
 const LOOKBACK_24 = 24 * HOUR_MS;
@@ -27,42 +34,75 @@ export async function GET(req: Request) {
   }
 
   try {
+    const db = getDb();
+    const eligible = await db
+      .select({ userId: userExtras.userId })
+      .from(userExtras)
+      .where(
+        and(
+          eq(userExtras.digestEnabled, true),
+          isNotNull(userExtras.onboardingCompletedAt),
+        ),
+      );
+
+    if (eligible.length === 0) {
+      return NextResponse.json({ users: 0, sent: 0 });
+    }
+
     const now = Date.now();
     const since48 = new Date(now - LOOKBACK_48);
     const cutoff24 = new Date(now - LOOKBACK_24);
 
-    const candidates = await getRecentAlertCandidates(since48);
+    let sent = 0;
+    let skipped = 0;
+    const perUser: Array<{
+      userId: string;
+      today: number;
+      yesterday: number;
+      sent: boolean;
+    }> = [];
 
-    // sectorForSlug + jobUrl are both async now (DB lookups behind
-    // module-memory cache). Resolve each row in parallel; the cache
-    // makes the second-onwards calls sub-ms.
-    const rows: AlertRow[] = await Promise.all(
-      candidates.map(async (m) => ({
-        level: m.level,
-        title: m.title,
-        companyDisplayName: m.companyDisplayName,
-        location: m.location,
-        url: await jobUrl(m.ats, m.companySlug, m.jobId),
-        firstSeen: m.firstSeen,
-        sector: await sectorForSlug(m.companySlug),
-        fitScore: m.fitScore != null ? parseFloat(m.fitScore) : null,
-        fitSummary: m.fitSummary,
-        fitFlag: m.fitFlag as FitFlag | null,
-      })),
-    );
+    for (const { userId } of eligible) {
+      const candidates = await getRecentAlertCandidates(userId, since48);
 
-    const alertable = rows.filter((r) =>
-      shouldAlert({ level: r.level, fitScore: r.fitScore, fitFlag: r.fitFlag }),
-    );
-    const today = alertable.filter((r) => r.firstSeen >= cutoff24);
-    const yesterday = alertable.filter((r) => r.firstSeen < cutoff24);
+      const rows: AlertRow[] = await Promise.all(
+        candidates.map(async (m) => ({
+          level: m.level,
+          title: m.title,
+          companyDisplayName: m.companyDisplayName,
+          location: m.location,
+          url: await jobUrl(m.ats, m.companySlug, m.jobId),
+          firstSeen: m.firstSeen,
+          sector: await sectorForSlug(m.companySlug),
+          fitScore: m.fitScore != null ? parseFloat(m.fitScore) : null,
+          fitSummary: m.fitSummary,
+          fitFlag: m.fitFlag as FitFlag | null,
+        })),
+      );
 
-    const sent = await sendDigest({ today, yesterday });
+      const alertable = rows.filter((r) =>
+        shouldAlert({ level: r.level, fitScore: r.fitScore, fitFlag: r.fitFlag }),
+      );
+      const today = alertable.filter((r) => r.firstSeen >= cutoff24);
+      const yesterday = alertable.filter((r) => r.firstSeen < cutoff24);
+
+      const ok = await sendDigest(userId, { today, yesterday });
+      if (ok) sent++;
+      else skipped++;
+      perUser.push({
+        userId,
+        today: today.length,
+        yesterday: yesterday.length,
+        sent: ok,
+      });
+    }
+
     return NextResponse.json({
       since: since48.toISOString(),
-      todayCount: today.length,
-      yesterdayCount: yesterday.length,
+      users: eligible.length,
       sent,
+      skipped,
+      perUser,
     });
   } catch (err) {
     console.error("Digest failed:", err);

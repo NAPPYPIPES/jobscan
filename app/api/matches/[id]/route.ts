@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { setMatchStatus } from "@/db/matches";
 import type { MatchStatus } from "@/db/schema";
-import { requireOwner } from "@/lib/auth/viewer";
+import { getViewerUserId, requireOwner } from "@/lib/auth/viewer";
 
 // PATCH /api/matches/{id}  body: { status: MatchStatus }
 //
@@ -34,7 +34,10 @@ export async function PATCH(
     );
   }
 
-  const result = await setMatchStatus(id, status as MatchStatus);
+  const userId = await getViewerUserId();
+  if (!userId) return NextResponse.json({ error: "not signed in" }, { status: 401 });
+
+  const result = await setMatchStatus(userId, id, status as MatchStatus);
   if (!result) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }

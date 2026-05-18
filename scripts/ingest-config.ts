@@ -23,6 +23,7 @@ import {
 import { replaceWorkdayTenants } from "../db/workday-tenants";
 import { replacePersonalKeywords } from "../db/personal-keywords";
 import { replaceScoringCaps } from "../db/scoring-caps";
+import { MAINTAINER_USER_ID } from "../lib/auth/maintainer";
 import type { ScoringCaps } from "../lib/config/scoring-caps-types";
 
 const KINDS = [
@@ -169,7 +170,9 @@ async function ingestScoringCaps() {
     throw new Error("scoring-caps config must be a JSON object");
   }
   const { _doc: _ignored, ...caps } = data;
-  await replaceScoringCaps(caps as ScoringCaps);
+  // CLI = maintainer. New users would edit their per-user caps via
+  // /docs (Phase 5 wired the action to take userId from session).
+  await replaceScoringCaps(MAINTAINER_USER_ID, caps as ScoringCaps);
   console.log(
     `[scoring-caps] 1 row written (source: ${source}) — ` +
       `daily=${caps.perDayCaps.maxNewJobsPerDay}, ` +

@@ -3,7 +3,8 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { manualChecks } from "@/db/schema";
 import { getValidManualCompanies } from "@/db/manual-companies";
-import { requireOwner } from "@/lib/auth/viewer";
+import { getViewerUserId, requireOwner } from "@/lib/auth/viewer";
+import { MAINTAINER_USER_ID } from "@/lib/auth/maintainer";
 
 // POST /api/manual/check  body: { company: string }
 //
@@ -37,13 +38,18 @@ export async function POST(req: Request) {
 
   // UTC date as ISO YYYY-MM-DD for the date column.
   const today = new Date().toISOString().slice(0, 10);
+  // Phase 2: write the signed-in user's id when available; fall back
+  // to the maintainer for the (currently impossible) unauthed-but-
+  // passed-middleware case. Phase 5 makes the unique constraint
+  // user-scoped so each user has their own daily-check stream.
+  const viewerUserId = (await getViewerUserId()) ?? MAINTAINER_USER_ID;
   const db = getDb();
   await db
     .insert(manualChecks)
-    .values({ company, checkDate: today })
+    .values({ userId: viewerUserId, company, checkDate: today })
     .onConflictDoUpdate({
       target: [manualChecks.company, manualChecks.checkDate],
-      set: { checkedAt: sql`now()` },
+      set: { checkedAt: sql`now()`, userId: viewerUserId },
     });
 
   return NextResponse.json({ success: true });

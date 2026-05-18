@@ -1,14 +1,15 @@
-// Cached getter + replacer for the scoring_caps table. Single row keyed
-// on 'default' (single-user app, matches user_profile's pattern). The
-// running app reads only from DB — config/scoring-caps.json is ingest
-// seed only, written here by scripts/ingest-config.ts and by the
-// /docs Settings UI server action.
+// Per-user cached getter + replacer for the scoring_caps table.
+// Phase 5 made this per-user — getScoringCaps now requires userId.
+// Each user has their own scoring_caps row (Phase 2 backfill seeded
+// the maintainer; new users fall back to FALLBACK_CAPS when no row
+// exists, then upsert on first replace).
 //
-// Mirrors db/profile.ts (cached getter + transactional replacer) but
-// uses the upsert-then-prune pattern from db/personal-keywords.ts since
-// neon-http doesn't support multi-statement transactions. For the
-// single-row case it's effectively just an upsert — no prune needed
-// because there's exactly one key ('default').
+// Note: monthlyCapsUsd inside the returned ScoringCaps is largely
+// IGNORED in Phase 5 — the per-user $ cap now derives from
+// user_extras.monthly_cap_usd via lib/fit/spendCaps.ts. The other
+// fields (perDayCaps, haikuToSonnetThresholds, behaviorOnCapHit)
+// are still used for global scan-throughput limits and escalation
+// policy.
 
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "./client";
@@ -19,55 +20,48 @@ import {
   type ScoringCaps,
 } from "@/lib/config/scoring-caps-types";
 
-// Module-memory cache. Cleared on every cold start (Vercel function
-// re-init) which is also when freshly-ingested caps would take effect
-// for a user who ran `npm run ingest-config`. The /docs server action
-// also writes here directly via replaceScoringCaps, so saves in the UI
-// reflect on the next request from the same warm container.
-let cached: ScoringCaps | null = null;
+// Per-user module-memory cache. Each user's caps are cached
+// independently. Cleared on every cold start.
+const cache = new Map<string, ScoringCaps>();
 
-// Returns the user's scoring caps, falling back to FALLBACK_CAPS when
-// the table is empty (fresh install before first `ingest-config`). The
-// FALLBACK is intentional: a forker should be able to spin up the repo
-// and have the scanner work with sane defaults, even before they edit
-// or ingest their own caps. The empty-config guardrail in run.ts only
-// fires for `targets` (the workhorse table) — caps absence is fine.
-export async function getScoringCaps(): Promise<ScoringCaps> {
-  if (cached) return cached;
+export async function getScoringCaps(userId: string): Promise<ScoringCaps> {
+  const hit = cache.get(userId);
+  if (hit) return hit;
   const db = getDb();
   const rows = await db
     .select({ config: scoringCaps.config })
     .from(scoringCaps)
-    .where(eq(scoringCaps.key, "default"))
+    .where(eq(scoringCaps.userId, userId))
     .limit(1);
-  cached = rows[0]?.config ?? FALLBACK_CAPS;
-  return cached;
+  const config = rows[0]?.config ?? FALLBACK_CAPS;
+  cache.set(userId, config);
+  return config;
 }
 
-// Replace the single caps row. Validates first to avoid persisting a
-// nonsense config (e.g. typo'd $200 total cap). On success, updates the
-// module cache so the same warm container reflects the new values
-// without a re-fetch. Called by scripts/ingest-config.ts and by the
-// /docs Settings UI server action.
+// Upsert the caps row for a user. Validates first to avoid persisting
+// a nonsense config. Upserts on user_id (UNIQUE constraint added in
+// Phase 2). The legacy `key` column stays at 'default' for the
+// maintainer's row, and at the user's id for new rows — Phase 7
+// cleanup drops the `key` column entirely.
 export async function replaceScoringCaps(
+  userId: string,
   next: ScoringCaps,
 ): Promise<ScoringCaps> {
   validateCaps(next);
   const db = getDb();
   await db
     .insert(scoringCaps)
-    .values({ key: "default", config: next })
+    .values({ key: userId, userId, config: next })
     .onConflictDoUpdate({
-      target: scoringCaps.key,
+      target: scoringCaps.userId,
       set: { config: next, updatedAt: sql`now()` },
     });
-  cached = next;
-  return cached;
+  cache.set(userId, next);
+  return next;
 }
 
 // Test/dev hook: clear the module cache so the next getScoringCaps()
-// round-trips to DB. Exposed for tests and for the unlikely case where
-// the DB row is mutated out-of-band.
+// round-trips to DB.
 export function _resetScoringCapsCache(): void {
-  cached = null;
+  cache.clear();
 }

@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
-import { getDb } from "@/db/client";
-import { matches } from "@/db/schema";
+import { dismissMatch } from "@/db/matches";
 import type { DismissReason } from "@/db/schema";
-import { requireOwner } from "@/lib/auth/viewer";
+import { getViewerUserId, requireOwner } from "@/lib/auth/viewer";
 
 // PATCH /api/matches/{id}/dismiss
 // body: { reasons?: DismissReason[] }
@@ -61,20 +59,10 @@ export async function PATCH(
     reasons = deduped.length > 0 ? deduped : null;
   }
 
-  const db = getDb();
-  const updated = await db
-    .update(matches)
-    .set({
-      status: "dismissed",
-      dismissedAt: sql`now()`,
-      dismissReason: reasons,
-      updatedAt: sql`now()`,
-    })
-    .where(eq(matches.id, id))
-    .returning({ id: matches.id });
+  const userId = await getViewerUserId();
+  if (!userId) return NextResponse.json({ error: "not signed in" }, { status: 401 });
 
-  if (updated.length === 0) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
+  const ok = await dismissMatch(userId, id, reasons);
+  if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ success: true });
 }

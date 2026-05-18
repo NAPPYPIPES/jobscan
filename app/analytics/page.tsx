@@ -1,10 +1,10 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
-import { apiUsage, matches, targets } from "@/db/schema";
+import { apiUsage, matches, targets, userMatches } from "@/db/schema";
 import { jobUrl } from "@/lib/scan/urls";
 import type { Level } from "@/lib/scan/types";
-import { getViewerRole } from "@/lib/auth/viewer";
-import { DEMO_SLUGS_ARRAY } from "@/lib/auth/demo-allowlist";
+import { getViewerRole, getViewerUserId } from "@/lib/auth/viewer";
 import TopCompaniesList, {
   type CompanyData,
 } from "../_components/top-companies-list";
@@ -29,44 +29,41 @@ export const dynamic = "force-dynamic";
 const SCAN_STALE_THRESHOLD_MINUTES = 90;
 
 export default async function Analytics() {
+  const userId = await getViewerUserId();
+  if (!userId) redirect("/login");
   const db = getDb();
   const viewerRole = await getViewerRole();
   const isDemo = viewerRole === "demo";
 
-  // Reusable slug filter for every query that produces match-derived
-  // aggregates. Owner sees all rows; demo viewers see only the
-  // curated allowlist. Inserted via spread into each query's
-  // and(...) — no-op when the array is empty (it never is).
-  const demoSlugFilter = isDemo
-    ? [inArray(matches.companySlug, DEMO_SLUGS_ARRAY as string[])]
-    : [];
+  // Phase 4: every match-derived aggregate joins user_matches and
+  // scopes to the viewer's user_id. The demo user has its own
+  // pre-seeded user_matches subset (see migration 0006), so we no
+  // longer slap a DEMO_SLUGS filter on every query — the join does it.
 
   // ─── Activity (last 72h) — three trend widgets ─────────────────────
-  // Single pass through the 72h slice of matches, bucketed three ways
-  // (level × window, fit-band, company × window). All exclude baseline
-  // + dismissed rows so the numbers represent genuine new signal.
   const since72hSql = sql`now() - interval '72 hours'`;
   const since48hSql = sql`now() - interval '48 hours'`;
   const since24hSql = sql`now() - interval '24 hours'`;
 
   const byLevelWindowRows = await db
     .select({
-      level: matches.level,
+      level: userMatches.level,
       h24: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since24hSql})::int`,
       h48: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since48hSql})::int`,
       h72: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since72hSql})::int`,
     })
-    .from(matches)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
+        eq(userMatches.userId, userId),
         gte(matches.firstSeen, since72hSql),
-        ne(matches.status, "dismissed"),
-        eq(matches.isBaseline, false),
+        ne(userMatches.status, "dismissed"),
+        eq(userMatches.isBaseline, false),
         isNull(matches.closedAt),
-        ...demoSlugFilter,
       ),
     )
-    .groupBy(matches.level);
+    .groupBy(userMatches.level);
   const newRolesByLevel: NewRolesByLevel = {
     BV: { h24: 0, h48: 0, h72: 0 },
     HIGH: { h24: 0, h48: 0, h72: 0 },
@@ -77,34 +74,25 @@ export default async function Analytics() {
     newRolesByLevel[r.level as Level] = { h24: r.h24, h48: r.h48, h72: r.h72 };
   }
 
-  // Fit band query — 24h slice, bucket by fit_score. Uses CASE because
-  // we want a derived label, not the raw numeric value, and the four
-  // bands aren't equal-width so width_bucket() would be awkward.
-  // Drizzle's sql template expands arrays as comma-separated
-  // placeholders ($1, $2, ..., $N), so wrapping with `ANY(...)` ends
-  // up as `ANY(($1, $2, ..., $N))` — a record, not an array, which
-  // Postgres rejects. JSONB round-trip is the cleanest workaround:
-  // bind the array as a single jsonb param, unpack server-side to a
-  // SETOF text, and use IN.
-  const fitBandDemoFilter = isDemo
-    ? sql` AND company_slug IN (SELECT jsonb_array_elements_text(${JSON.stringify(
-        DEMO_SLUGS_ARRAY,
-      )}::jsonb))`
-    : sql``;
+  // Fit band query — 24h slice, bucket by fit_score. Per-user via
+  // join. Drizzle's raw sql template lets us keep the CASE-based
+  // bucketing as a single statement.
   const byFitBandRows = await db.execute(
     sql`SELECT
       CASE
-        WHEN fit_score IS NULL THEN 'unscored'
-        WHEN fit_score >= 8.0 THEN 'high'
-        WHEN fit_score >= 6.0 THEN 'good'
+        WHEN um.fit_score IS NULL THEN 'unscored'
+        WHEN um.fit_score >= 8.0 THEN 'high'
+        WHEN um.fit_score >= 6.0 THEN 'good'
         ELSE 'low'
       END AS band,
       count(*)::int AS count
-    FROM matches
-    WHERE first_seen >= now() - interval '24 hours'
-      AND status != 'dismissed'
-      AND is_baseline = false
-      AND closed_at IS NULL${fitBandDemoFilter}
+    FROM user_matches um
+    JOIN matches m ON m.id = um.match_id
+    WHERE um.user_id = ${userId}
+      AND m.first_seen >= now() - interval '24 hours'
+      AND um.status != 'dismissed'
+      AND um.is_baseline = false
+      AND m.closed_at IS NULL
     GROUP BY band`,
   );
   const newRolesByFit: NewRolesByFitBand = {
@@ -127,14 +115,15 @@ export default async function Analytics() {
       h48: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since48hSql})::int`,
       h72: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since72hSql})::int`,
     })
-    .from(matches)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
+        eq(userMatches.userId, userId),
         gte(matches.firstSeen, since72hSql),
-        ne(matches.status, "dismissed"),
-        eq(matches.isBaseline, false),
+        ne(userMatches.status, "dismissed"),
+        eq(userMatches.isBaseline, false),
         isNull(matches.closedAt),
-        ...demoSlugFilter,
       ),
     )
     .groupBy(matches.companySlug, matches.companyDisplayName);
@@ -146,24 +135,25 @@ export default async function Analytics() {
     h72: r.h72,
   }));
 
-  // ─── Top 10 companies by open roles (existing) ─────────────────────
+  // ─── Top 10 companies by open roles ─────────────────────────────────
   const perSlugLevel = await db
     .select({
       slug: matches.companySlug,
       name: matches.companyDisplayName,
-      level: matches.level,
+      level: userMatches.level,
       count: sql<number>`count(*)::int`,
     })
-    .from(matches)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
-        ne(matches.status, "dismissed"),
-        eq(matches.isBaseline, false),
+        eq(userMatches.userId, userId),
+        ne(userMatches.status, "dismissed"),
+        eq(userMatches.isBaseline, false),
         isNull(matches.closedAt),
-        ...demoSlugFilter,
       ),
     )
-    .groupBy(matches.companySlug, matches.companyDisplayName, matches.level);
+    .groupBy(matches.companySlug, matches.companyDisplayName, userMatches.level);
   const companyMap = new Map<string, CompanyData>();
   for (const r of perSlugLevel) {
     let entry = companyMap.get(r.slug);
@@ -180,44 +170,76 @@ export default async function Analytics() {
   const companies = Array.from(companyMap.values());
 
   // ─── Closed roles + per-target scan failures ───────────────────────
-  // Closed rows are now authoritative (closed_at is set by the scanner
-  // after a successful scan that didn't return a previously-known
-  // job_id). Read them directly — no more lastSeen-lag heuristic.
+  // Closed rows are global — when matches.closed_at is set, the job
+  // is gone for everyone. But we still want to scope the closed
+  // count to roles the viewer was watching (joined via user_matches).
   const closedTotalRow = await db
     .select({ count: sql<number>`count(*)::int` })
-    .from(matches)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
-        ne(matches.status, "dismissed"),
+        eq(userMatches.userId, userId),
+        ne(userMatches.status, "dismissed"),
         isNotNull(matches.closedAt),
-        ...demoSlugFilter,
       ),
     );
   const closedTotal = closedTotalRow[0]?.count ?? 0;
 
   const closedRows = await db
-    .select()
-    .from(matches)
+    .select({
+      // Re-project to the shape Match expects so ClosedRoles' CompactRow
+      // can render. Per-user state pulled from user_matches.
+      id: matches.id,
+      ats: matches.ats,
+      companySlug: matches.companySlug,
+      companyDisplayName: matches.companyDisplayName,
+      jobId: matches.jobId,
+      title: matches.title,
+      location: matches.location,
+      firstSeen: matches.firstSeen,
+      lastSeen: matches.lastSeen,
+      closedAt: matches.closedAt,
+      createdAt: matches.createdAt,
+      level: userMatches.level,
+      status: userMatches.status,
+      isBaseline: userMatches.isBaseline,
+      appliedAt: userMatches.appliedAt,
+      dismissedAt: userMatches.dismissedAt,
+      dismissReason: userMatches.dismissReason,
+      fitScore: userMatches.fitScore,
+      fitSummary: userMatches.fitSummary,
+      fitFlag: userMatches.fitFlag,
+      tier1Score: userMatches.tier1Score,
+      tier1Confidence: userMatches.tier1Confidence,
+      tier1IsPotentialBv: userMatches.tier1IsPotentialBv,
+      tier1QuickTake: userMatches.tier1QuickTake,
+      pendingBvVerification: userMatches.pendingBvVerification,
+      bvReasoning: userMatches.bvReasoning,
+      updatedAt: userMatches.updatedAt,
+    })
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
-        ne(matches.status, "dismissed"),
+        eq(userMatches.userId, userId),
+        ne(userMatches.status, "dismissed"),
         isNotNull(matches.closedAt),
-        ...demoSlugFilter,
       ),
     )
     .orderBy(desc(matches.closedAt))
     .limit(25);
   const closedWithUrls: ClosedRow[] = await Promise.all(
     closedRows.map(async (m) => ({
-      m,
+      m: m as ClosedRow["m"],
       applyUrl: await jobUrl(m.ats, m.companySlug, m.jobId),
     })),
   );
 
   // Failing-scan detection: a target is flagged if its
   // last_success_at is meaningfully older than the most recent
-  // successful scan across all targets. NULL = never scanned
-  // successfully (brand new) and shows in its own band.
+  // successful scan across all targets. Scoped to the viewer's
+  // user_targets so demo sees only their curated set.
   const latestSuccessRow = await db
     .select({ ts: sql<string | null>`max(${targets.lastSuccessAt})` })
     .from(targets);
@@ -226,44 +248,32 @@ export default async function Analytics() {
   const scanCutoffSql = sql`(SELECT max(${targets.lastSuccessAt}) FROM ${targets}) - interval '${sql.raw(
     String(SCAN_STALE_THRESHOLD_MINUTES),
   )} minutes'`;
-  // Demo viewers also get the slug filter on the targets table —
-  // otherwise the failing-scan list shows companies they shouldn't
-  // know about (Mastercard, Citi, etc. that fail more often).
-  const failingTargetsDemoFilter = isDemo
-    ? [inArray(targets.slug, DEMO_SLUGS_ARRAY as string[])]
-    : [];
-  const failingRows = await db
-    .select({
-      slug: targets.slug,
-      displayName: targets.displayName,
-      ats: targets.ats,
-      lastSuccessAt: targets.lastSuccessAt,
-    })
-    .from(targets)
-    .where(
-      and(
-        or(
-          isNull(targets.lastSuccessAt),
-          sql`${targets.lastSuccessAt} < ${scanCutoffSql}`,
-        ),
-        ...failingTargetsDemoFilter,
-      ),
-    )
-    .orderBy(asc(targets.lastSuccessAt));
-  const failingTargets: FailingTarget[] = failingRows.map((r) => ({
+  const failingRows = await db.execute(sql`
+    SELECT t.slug, t.display_name, t.ats, t.last_success_at
+    FROM targets t
+    JOIN user_targets ut ON ut.target_slug = t.slug AND ut.user_id = ${userId}
+    WHERE t.last_success_at IS NULL
+       OR t.last_success_at < ${scanCutoffSql}
+    ORDER BY t.last_success_at ASC NULLS FIRST
+  `);
+  const failingTargets: FailingTarget[] = (
+    failingRows.rows as Array<{
+      slug: string;
+      display_name: string;
+      ats: string;
+      last_success_at: string | null;
+    }>
+  ).map((r) => ({
     slug: r.slug,
-    displayName: r.displayName,
-    ats: r.ats,
-    lastSuccessIso: r.lastSuccessAt
-      ? new Date(r.lastSuccessAt).toISOString()
-      : null,
+    displayName: r.display_name,
+    ats: r.ats as FailingTarget["ats"],
+    lastSuccessIso: r.last_success_at ? new Date(r.last_success_at).toISOString() : null,
   }));
 
   // ─── Personal-data sections (skipped entirely in demo mode) ───────
-  // Dismissal patterns + API spend reveal the owner's actual
-  // job-search activity. Skip the queries to save round trips and
-  // avoid any chance of leakage into the rendered JSX. The
-  // corresponding sections render only when !isDemo.
+  // Dismissal patterns + API spend reveal the viewer's actual
+  // job-search activity. Skip the queries in demo to save round
+  // trips. (Demo user has nothing to reveal anyway.)
   let dailySpend: DailySpendRow[] = [];
   let dismissByReason: Record<string, number> = {};
   let noTagCount = 0;
@@ -278,7 +288,12 @@ export default async function Analytics() {
         total: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text`,
       })
       .from(apiUsage)
-      .where(gte(apiUsage.calledAt, sql`now() - interval '90 days'`))
+      .where(
+        and(
+          eq(apiUsage.userId, userId),
+          gte(apiUsage.calledAt, sql`now() - interval '90 days'`),
+        ),
+      )
       .groupBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`)
       .orderBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`);
     dailySpend = dailySpendRows.map((r) => ({
@@ -287,9 +302,11 @@ export default async function Analytics() {
     }));
 
     const dismissByReasonRows = await db.execute(
-      sql`SELECT unnest(dismiss_reason) AS reason, count(*)::int AS count
-          FROM matches
-          WHERE status = 'dismissed' AND dismiss_reason IS NOT NULL
+      sql`SELECT unnest(um.dismiss_reason) AS reason, count(*)::int AS count
+          FROM user_matches um
+          WHERE um.user_id = ${userId}
+            AND um.status = 'dismissed'
+            AND um.dismiss_reason IS NOT NULL
           GROUP BY reason`,
     );
     for (const r of dismissByReasonRows.rows as { reason: string; count: number }[]) {
@@ -297,17 +314,20 @@ export default async function Analytics() {
     }
     const noTagRow = await db.execute(
       sql`SELECT count(*)::int AS count
-          FROM matches
-          WHERE status = 'dismissed' AND dismiss_reason IS NULL`,
+          FROM user_matches um
+          WHERE um.user_id = ${userId}
+            AND um.status = 'dismissed'
+            AND um.dismiss_reason IS NULL`,
     );
-    noTagCount =
-      (noTagRow.rows[0] as { count: number } | undefined)?.count ?? 0;
+    noTagCount = (noTagRow.rows[0] as { count: number } | undefined)?.count ?? 0;
 
     const topDismissedCompaniesRows = await db.execute(
-      sql`SELECT company_display_name AS company, count(*)::int AS count
-          FROM matches
-          WHERE status = 'dismissed'
-          GROUP BY company_display_name
+      sql`SELECT m.company_display_name AS company, count(*)::int AS count
+          FROM user_matches um
+          JOIN matches m ON m.id = um.match_id
+          WHERE um.user_id = ${userId}
+            AND um.status = 'dismissed'
+          GROUP BY m.company_display_name
           ORDER BY count DESC
           LIMIT 5`,
     );
@@ -317,10 +337,12 @@ export default async function Analytics() {
     }[];
 
     const topDismissedTitlesRows = await db.execute(
-      sql`SELECT title, count(*)::int AS count
-          FROM matches
-          WHERE status = 'dismissed'
-          GROUP BY title
+      sql`SELECT m.title, count(*)::int AS count
+          FROM user_matches um
+          JOIN matches m ON m.id = um.match_id
+          WHERE um.user_id = ${userId}
+            AND um.status = 'dismissed'
+          GROUP BY m.title
           ORDER BY count DESC
           LIMIT 10`,
     );
@@ -330,18 +352,55 @@ export default async function Analytics() {
     }[];
 
     const recentDismissed = await db
-      .select()
-      .from(matches)
-      .where(eq(matches.status, "dismissed"))
-      .orderBy(desc(matches.updatedAt))
+      .select({
+        // Match the shape compact-row expects (the Match $inferSelect
+        // type — still the legacy matches.$inferSelect since that's
+        // what the component imports). We project user_matches state
+        // into the same field names.
+        id: matches.id,
+        ats: matches.ats,
+        companySlug: matches.companySlug,
+        companyDisplayName: matches.companyDisplayName,
+        jobId: matches.jobId,
+        title: matches.title,
+        location: matches.location,
+        firstSeen: matches.firstSeen,
+        lastSeen: matches.lastSeen,
+        closedAt: matches.closedAt,
+        createdAt: matches.createdAt,
+        level: userMatches.level,
+        status: userMatches.status,
+        isBaseline: userMatches.isBaseline,
+        appliedAt: userMatches.appliedAt,
+        dismissedAt: userMatches.dismissedAt,
+        dismissReason: userMatches.dismissReason,
+        fitScore: userMatches.fitScore,
+        fitSummary: userMatches.fitSummary,
+        fitFlag: userMatches.fitFlag,
+        tier1Score: userMatches.tier1Score,
+        tier1Confidence: userMatches.tier1Confidence,
+        tier1IsPotentialBv: userMatches.tier1IsPotentialBv,
+        tier1QuickTake: userMatches.tier1QuickTake,
+        pendingBvVerification: userMatches.pendingBvVerification,
+        bvReasoning: userMatches.bvReasoning,
+        updatedAt: userMatches.updatedAt,
+      })
+      .from(userMatches)
+      .innerJoin(matches, eq(matches.id, userMatches.matchId))
+      .where(and(eq(userMatches.userId, userId), eq(userMatches.status, "dismissed")))
+      .orderBy(desc(userMatches.updatedAt))
       .limit(25);
     recentWithUrls = await Promise.all(
       recentDismissed.map(async (m) => ({
-        m,
+        m: m as typeof matches.$inferSelect,
         url: await jobUrl(m.ats, m.companySlug, m.jobId),
       })),
     );
   }
+
+  // `or` import retained — used in older revisions; kept available
+  // for any future inline filter that needs disjunction.
+  void or;
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12 sm:py-16">

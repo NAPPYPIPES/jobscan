@@ -20,6 +20,7 @@ import {
   fetchDescription,
 } from "../lib/fit/fetch-description";
 import { scoreFitWithClaude, persistScore } from "../lib/fit/score";
+import { MAINTAINER_USER_ID } from "../lib/auth/maintainer";
 import { sectorForSlug } from "../db/targets";
 import type { Sector } from "../lib/scan/types";
 import type { Tier1Result } from "../lib/fit/escalation";
@@ -93,6 +94,7 @@ async function main(): Promise<void> {
         : undefined;
 
     const out = await scoreFitWithClaude({
+      userId: MAINTAINER_USER_ID,
       matchId: m.id,
       title: m.title,
       company: m.companyDisplayName,
@@ -109,6 +111,7 @@ async function main(): Promise<void> {
     }
     totalCost += out.costUsd;
     await persistScore(
+      MAINTAINER_USER_ID,
       m.id,
       out.fit,
       out.tokensIn,

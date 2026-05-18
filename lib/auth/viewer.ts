@@ -1,32 +1,36 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import type { Role } from "./cookie";
+import { isDemoUser } from "./maintainer";
 
-// Server-side helpers for reading the viewer's role. The role lives
-// on the request via the `x-par-role` header that middleware.ts
-// writes after a successful cookie verify. Reading it here is just
-// a header lookup — no HMAC re-verification per request.
+// Server-side helpers for reading the viewer's identity. The user id
+// lives on the request via the `x-par-user-id` header that
+// middleware.ts writes after a successful NextAuth JWT verify.
 //
-// Defaults to 'owner' when the header is missing. The middleware
-// only lets unauthenticated requests through to /login (which
-// doesn't render any owner-only content), and the dev-bypass path
-// also writes 'owner', so a missing header in any owner-reachable
-// context is the safe assumption. Demo viewers always carry the
-// explicit "demo" header value.
+// Two effective roles:
+//   - "owner" — the signed-in user is operating on their own data
+//                (maintainer, paying friend, etc.).
+//   - "demo"  — the signed-in user is the pre-seeded DEMO_USER_ID.
+//               Mutations are blocked, AI calls are blocked by the
+//               $0 monthly cap on user_extras, and a banner explains
+//               the demo framing.
 
-const HEADER = "x-par-role";
+const HEADER_USER_ID = "x-par-user-id";
 
 export type { Role };
 
-export async function getViewerRole(): Promise<Role> {
+export async function getViewerUserId(): Promise<string | null> {
   const h = await headers();
-  const v = h.get(HEADER);
-  if (v === "demo") return "demo";
-  return "owner";
+  return h.get(HEADER_USER_ID);
+}
+
+export async function getViewerRole(): Promise<Role> {
+  const userId = await getViewerUserId();
+  return isDemoUser(userId) ? "demo" : "owner";
 }
 
 // Convenience for API mutation routes: returns null on success,
-// returns a 403 NextResponse on failure. Callers `return result` if
+// returns a 403 NextResponse on demo. Callers `return result` if
 // it's non-null, otherwise proceed with the mutation. Single source
 // of truth for the demo block — every mutation route uses this so
 // none of them can drift.

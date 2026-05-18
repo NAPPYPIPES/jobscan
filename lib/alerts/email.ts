@@ -1,4 +1,8 @@
 import { Resend } from "resend";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { users, userExtras } from "@/db/schema";
+import { checkSpend } from "@/lib/fit/spendCaps";
 import type { FitFlag } from "@/lib/fit/score";
 import type { Level, Sector } from "@/lib/scan/types";
 
@@ -131,7 +135,12 @@ function renderSectionRows(rows: AlertRow[], now: Date): string[] {
   return lines;
 }
 
-function buildText(data: DigestData, now: Date, siteUrl: string): string {
+function buildText(
+  data: DigestData,
+  now: Date,
+  siteUrl: string,
+  capNotice: string | null,
+): string {
   const { today, yesterday } = data;
   const lines: string[] = [];
 
@@ -145,6 +154,14 @@ function buildText(data: DigestData, now: Date, siteUrl: string): string {
     );
   }
   lines.push("");
+
+  // Phase 6: if the user has hit their monthly cap, surface that
+  // up front. Without this note, capped users would see "pending"
+  // markers on roles indefinitely and wonder why scoring stopped.
+  if (capNotice) {
+    lines.push(capNotice);
+    lines.push("");
+  }
 
   // Today section — primary signal.
   lines.push(`== TODAY (last 24h) ==`);
@@ -168,21 +185,88 @@ function buildText(data: DigestData, now: Date, siteUrl: string): string {
   return lines.join("\n");
 }
 
-// Send the daily digest. Always sends if RESEND_API_KEY is configured,
-// even when both today + yesterday are empty — a reliable daily ping
-// is the whole point. Returns false on missing API key or Resend error.
-export async function sendDigest(data: DigestData): Promise<boolean> {
+// Resolve the recipient + cap notice for a user. Returns null when
+// the user shouldn't get an email at all (digest_enabled=false, no
+// resolvable email address). Separate from sendDigest so the cron
+// route can short-circuit cheaply for opted-out users without
+// composing an email body.
+export type RecipientInfo = {
+  to: string;
+  capNotice: string | null;
+};
+
+export async function resolveRecipient(
+  userId: string,
+): Promise<RecipientInfo | null> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      email: users.email,
+      digestEnabled: userExtras.digestEnabled,
+      digestEmail: userExtras.digestEmail,
+      monthlyCapUsd: userExtras.monthlyCapUsd,
+    })
+    .from(users)
+    .leftJoin(userExtras, eq(userExtras.userId, users.id))
+    .where(eq(users.id, userId))
+    .limit(1);
+  const row = rows[0];
+  if (!row || !row.digestEnabled) return null;
+  const to = row.digestEmail?.trim() || row.email?.trim();
+  if (!to) return null;
+
+  // Cap notice. Use the same total-cap check the scoring path uses
+  // (lib/fit/spendCaps.ts) so the email's claim of "capped" matches
+  // what /docs would show.
+  let capNotice: string | null = null;
+  const cap = parseFloat(row.monthlyCapUsd ?? "0");
+  if (cap > 0) {
+    const status = await checkSpend(userId, "score");
+    if (status.totalCapReached) {
+      capNotice =
+        `⚠️  You hit your monthly $${status.totalCap.toFixed(2)} cap ` +
+        `($${status.totalSpent.toFixed(2)} used). AI scoring is paused until ` +
+        `the next month rolls over. New matches will show as [pending] until then.`;
+    }
+  } else {
+    // cap=0 (demo user, or someone the maintainer froze) — explicit
+    // notice rather than silent ambiguity.
+    capNotice =
+      "⚠️  AI scoring is disabled for this account. New matches show as [pending].";
+  }
+
+  return { to, capNotice };
+}
+
+// Send a daily digest to one user. The cron route loops every
+// onboarded user with digest_enabled=true and calls this once each;
+// recipient + cap notice come from resolveRecipient(userId).
+//
+// Returns false on missing API key, missing recipient (user opted
+// out or no email on file), or Resend error.
+export async function sendDigest(
+  userId: string,
+  data: DigestData,
+): Promise<boolean> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn("[alerts] RESEND_API_KEY not set — skipping email send");
     return false;
   }
   const from = process.env.ALERT_FROM_EMAIL;
-  const to = process.env.ALERT_TO_EMAIL;
-  if (!from || !to) {
-    console.warn("[alerts] ALERT_FROM_EMAIL or ALERT_TO_EMAIL not set — skipping email send");
+  if (!from) {
+    console.warn("[alerts] ALERT_FROM_EMAIL not set — skipping email send");
     return false;
   }
+
+  const recipient = await resolveRecipient(userId);
+  if (!recipient) {
+    // Either the user has digest_enabled=false, or they have no
+    // resolvable email. Either way: skip silently. The cron loop
+    // counts this as "skipped, not failed."
+    return false;
+  }
+
   const siteUrl = process.env.SITE_URL ?? "(set SITE_URL in env)";
 
   const total = data.today.length + data.yesterday.length;
@@ -190,17 +274,19 @@ export async function sendDigest(data: DigestData): Promise<boolean> {
   const resend = new Resend(apiKey);
   const { data: result, error } = await resend.emails.send({
     from,
-    to,
+    to: recipient.to,
     subject: buildSubject(data),
-    text: buildText(data, new Date(), siteUrl),
+    text: buildText(data, new Date(), siteUrl, recipient.capNotice),
   });
   if (error) {
-    console.error("[alerts] Resend send failed:", error);
+    console.error(
+      `[alerts] Resend send failed (user ${userId.slice(0, 8)}):`,
+      error,
+    );
     return false;
   }
   console.log(
-    `[alerts] digest sent (today=${data.today.length}, yesterday=${data.yesterday.length}, ` +
-      `total=${total}), id=${result?.id}`,
+    `[alerts] digest sent to ${recipient.to} (user ${userId.slice(0, 8)}, today=${data.today.length}, yesterday=${data.yesterday.length}, total=${total}, id=${result?.id})`,
   );
   return true;
 }

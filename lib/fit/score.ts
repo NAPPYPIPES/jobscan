@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { and, desc, eq, gte, inArray, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { apiUsage, companies, matches } from "@/db/schema";
+import { apiUsage, companies, matches, userMatches } from "@/db/schema";
 import { ALL_ATSES, LEVEL_ORDER, type Level, type Sector } from "@/lib/scan/types";
 import { sectorForSlug } from "@/db/targets";
 import { extractScoringText, fetchDescription } from "./fetch-description";
@@ -33,23 +33,29 @@ export type CapStatus = {
 };
 export type CapCheckFn = () => Promise<CapStatus>;
 
-// Cap check now reads from config-backed scoring_caps via spendCaps.ts.
-// Hard cap = score-purpose cap or total cap (whichever hits first).
-// Soft warn at 80% of score cap so logs surface the approach.
-const defaultMonthlyCapCheck: CapCheckFn = async () => {
-  const status = await checkSpend("score");
-  const hardReached = status.capReached || status.totalCapReached;
-  const softReached = status.spent >= status.cap * 0.8;
-  const label = status.totalCapReached
-    ? `total $${status.totalCap.toFixed(0)}`
-    : `score $${status.cap.toFixed(0)}`;
-  return {
-    hardReached,
-    softReached,
-    spend: status.totalCapReached ? status.totalSpent : status.spent,
-    label,
+// Cap check is per-user — each user's apportioned budget comes from
+// user_extras.monthly_cap_usd via spendCaps.ts. Hard cap = score-
+// purpose cap or total cap (whichever hits first). Soft warn at 80%
+// of score cap so logs surface the approach.
+//
+// Factory takes the userId at construction time; the returned closure
+// is the CapCheckFn shape scoreFitWithClaude wants.
+export function makeUserCapCheck(userId: string): CapCheckFn {
+  return async () => {
+    const status = await checkSpend(userId, "score");
+    const hardReached = status.capReached || status.totalCapReached;
+    const softReached = status.spent >= status.cap * 0.8;
+    const label = status.totalCapReached
+      ? `total $${status.totalCap.toFixed(0)}`
+      : `score $${status.cap.toFixed(0)}`;
+    return {
+      hardReached,
+      softReached,
+      spend: status.totalCapReached ? status.totalSpent : status.spent,
+      label,
+    };
   };
-};
+}
 
 export type FitFlag =
   | "none"
@@ -113,10 +119,11 @@ export async function getCompanyDescription(slug: string): Promise<string | null
   return rows[0]?.description ?? null;
 }
 
-// Sum of api_usage.cost_usd for the current calendar month (UTC). Used
-// as the gate before each scoring call. Indexed on called_at so this
-// stays cheap even as the ledger grows.
-export async function getCurrentMonthSpend(): Promise<number> {
+// Sum of api_usage.cost_usd for the current calendar month (UTC),
+// scoped to a single user. Phase 5: caller passes their viewerUserId
+// so the spend display in /docs is per-viewer, and the cap pre-checks
+// in /api/matches/[id]/summarize gate on the right user's budget.
+export async function getCurrentMonthSpend(userId: string): Promise<number> {
   const db = getDb();
   const start = new Date();
   start.setUTCDate(1);
@@ -124,7 +131,7 @@ export async function getCurrentMonthSpend(): Promise<number> {
   const rows = await db
     .select({ total: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text` })
     .from(apiUsage)
-    .where(gte(apiUsage.calledAt, start));
+    .where(and(eq(apiUsage.userId, userId), gte(apiUsage.calledAt, start)));
   return parseFloat(rows[0]?.total ?? "0");
 }
 
@@ -138,10 +145,14 @@ export async function getCurrentMonthSpend(): Promise<number> {
 // company names, accolades) that Sonnet needs for accurate BV detection.
 // Falls back to the parsed summary if raw resume is missing.
 async function buildSystemBlocks(
+  userId: string,
   rubric: ScoringRubric,
 ): Promise<Anthropic.Messages.TextBlockParam[]> {
-  const raw = await getRawResume();
-  const profile = await getUserProfile();
+  // Per-user resume read. Maintainer's resume comes from
+  // `npm run ingest-resume`; new users' resumes from the onboarding
+  // wizard. Both routes write to user_profile keyed on user_id.
+  const raw = await getRawResume(userId);
+  const profile = await getUserProfile(userId);
 
   const profileBlock = raw
     ? raw
@@ -366,6 +377,7 @@ Return this JSON exactly. No other text. No markdown fences.
 // is responsible for persisting both the matches.fit_* fields and the
 // api_usage row when ok:true.
 export async function scoreFitWithClaude(args: {
+  userId: string;
   matchId: string;
   title: string;
   company: string;
@@ -385,7 +397,7 @@ export async function scoreFitWithClaude(args: {
   // against an updated rubric. Default false (production path never
   // re-pays).
   force?: boolean;
-  // Pluggable cap check — defaults to the month-to-date cap.
+  // Pluggable cap check — defaults to the current user's monthly cap.
   capCheck?: CapCheckFn;
   // Pluggable rubric — defaults to DEFAULT_RUBRIC.
   rubric?: ScoringRubric;
@@ -395,21 +407,27 @@ export async function scoreFitWithClaude(args: {
     return { ok: false, reason: "missing_key" };
   }
 
-  // Idempotency: if a prior scan already scored this row, don't pay
-  // again on a retry. fit_score IS NOT NULL means we have a result.
+  // Idempotency: if a prior scoring pass already scored this row FOR
+  // THIS USER, don't pay again on a retry. fit_score IS NOT NULL on
+  // the user_matches row means we have a result for them.
   if (!args.force) {
     const db = getDb();
     const existing = await db
-      .select({ fitScore: matches.fitScore })
-      .from(matches)
-      .where(and(eq(matches.id, args.matchId)))
+      .select({ fitScore: userMatches.fitScore })
+      .from(userMatches)
+      .where(
+        and(
+          eq(userMatches.userId, args.userId),
+          eq(userMatches.matchId, args.matchId),
+        ),
+      )
       .limit(1);
     if (existing[0]?.fitScore != null) {
       return { ok: false, reason: "already_scored" };
     }
   }
 
-  const cap = await (args.capCheck ?? defaultMonthlyCapCheck)();
+  const cap = await (args.capCheck ?? makeUserCapCheck(args.userId))();
   if (cap.hardReached) {
     console.error(
       `[fit] ${cap.label} cap reached ($${cap.spend.toFixed(2)}). Skipping.`,
@@ -435,7 +453,7 @@ export async function scoreFitWithClaude(args: {
     : args.description;
 
   const companyDescription = await getCompanyDescription(args.companySlug);
-  const systemBlocks = await buildSystemBlocks(rubric);
+  const systemBlocks = await buildSystemBlocks(args.userId, rubric);
 
   try {
     const response = await client.messages.create({
@@ -692,11 +710,18 @@ function parseFitJson(text: string, rubric: ScoringRubric): FitScore | null {
 //
 // Run from /api/cron/score after /api/cron/scan. Budget keeps us
 // inside Vercel Hobby's 60s function ceiling.
-export async function scoreUnscoredEligibleFromDb(opts: {
-  limit?: number;
-  timeBudgetMs?: number;
-  rubric?: ScoringRubric;
-}): Promise<{
+// Score eligible user_matches rows for a single user. Phase 5: this
+// replaces the pre-multi-tenant scoreUnscoredEligibleFromDb. The cron
+// /api/cron/score loops every user with cap > 0 + onboarding done
+// and calls this once each.
+export async function scoreUnscoredEligibleForUser(
+  userId: string,
+  opts: {
+    limit?: number;
+    timeBudgetMs?: number;
+    rubric?: ScoringRubric;
+  },
+): Promise<{
   scored: number;
   triagedOnly: number;
   pendingBvProcessed: number;
@@ -710,40 +735,66 @@ export async function scoreUnscoredEligibleFromDb(opts: {
   const start = Date.now();
 
   const db = getDb();
-  const caps = await getScoringCaps();
+  const caps = await getScoringCaps(userId);
+
+  // Common shape: every queue row carries the global match facts
+  // (title, location, etc.) AND the user's per-user state (tier1_*,
+  // pending_bv, status). Joining once + projecting both is cheaper
+  // than two queries.
+  const joinedSelect = {
+    id: matches.id,
+    ats: matches.ats,
+    companySlug: matches.companySlug,
+    companyDisplayName: matches.companyDisplayName,
+    jobId: matches.jobId,
+    title: matches.title,
+    location: matches.location,
+    firstSeen: matches.firstSeen,
+    closedAt: matches.closedAt,
+    // Per-user state from user_matches:
+    level: userMatches.level,
+    status: userMatches.status,
+    tier1Score: userMatches.tier1Score,
+    tier1Confidence: userMatches.tier1Confidence,
+    tier1IsPotentialBv: userMatches.tier1IsPotentialBv,
+    tier1QuickTake: userMatches.tier1QuickTake,
+    pendingBvVerification: userMatches.pendingBvVerification,
+    fitScore: userMatches.fitScore,
+  };
 
   // Pop 1: pending_bv_verification = true → auto-pickup retroactive
   // Tier-2. These already have Tier-1 fields populated; just need
   // Sonnet to verify the BV claim.
   const pendingBv = await db
-    .select()
-    .from(matches)
+    .select(joinedSelect)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
-        eq(matches.pendingBvVerification, true),
+        eq(userMatches.userId, userId),
+        eq(userMatches.pendingBvVerification, true),
         inArray(matches.ats, ALL_ATSES),
-        ne(matches.status, "dismissed"),
+        ne(userMatches.status, "dismissed"),
         isNull(matches.closedAt),
       ),
     )
     .orderBy(desc(matches.firstSeen));
 
-  // Pop 2: Tier-1 not yet run (tier1_score IS NULL) on otherwise
-  // eligible rows. The old query keyed on fit_score IS NULL; switching
-  // to tier1_score IS NULL covers everything fit_score IS NULL did
-  // PLUS the rows that have a Tier-1 result but no Tier-2 yet — but
-  // those are handled by pop 1 or by levelFromTier1 already, so we
-  // don't re-process them.
+  // Pop 2: Tier-1 not yet run for this user. Per-user tier1_score
+  // means each user does their own Tier-1 pass against their own
+  // resume.
   const fresh = await db
-    .select()
-    .from(matches)
+    .select(joinedSelect)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
-        isNull(matches.tier1Score),
-        isNull(matches.fitScore),
-        inArray(matches.level, ["BV", "HIGH", "MEDIUM"]),
+        eq(userMatches.userId, userId),
+        isNull(userMatches.tier1Score),
+        isNull(userMatches.fitScore),
+        inArray(userMatches.level, ["BV", "HIGH", "MEDIUM"]),
         inArray(matches.ats, ALL_ATSES),
-        ne(matches.status, "dismissed"),
+        ne(userMatches.status, "dismissed"),
         isNull(matches.closedAt),
       ),
     )
@@ -766,7 +817,7 @@ export async function scoreUnscoredEligibleFromDb(opts: {
   for (const m of work) {
     if (Date.now() - start > timeBudgetMs) {
       console.warn(
-        `[fit] time budget exhausted (${timeBudgetMs}ms) — bailing with ${scored + triagedOnly} processed, ${totalPending - (scored + triagedOnly + skipped + errored)} remaining`,
+        `[fit] [user ${userId.slice(0, 8)}] time budget exhausted (${timeBudgetMs}ms) — bailing with ${scored + triagedOnly} processed, ${totalPending - (scored + triagedOnly + skipped + errored)} remaining`,
       );
       break;
     }
@@ -774,10 +825,10 @@ export async function scoreUnscoredEligibleFromDb(opts: {
     const isPendingBvRow = m.pendingBvVerification;
 
     // Total-cap check up front for both paths. Hard stop if hit.
-    const totalSpendStatus = await checkSpend("triage");
+    const totalSpendStatus = await checkSpend(userId, "triage");
     if (totalSpendStatus.totalCapReached) {
       console.warn(
-        `[fit] total monthly cap reached ($${totalSpendStatus.totalSpent.toFixed(2)}/$${totalSpendStatus.totalCap.toFixed(2)}) — aborting tick`,
+        `[fit] [user ${userId.slice(0, 8)}] total monthly cap reached ($${totalSpendStatus.totalSpent.toFixed(2)}/$${totalSpendStatus.totalCap.toFixed(2)}) — aborting tick`,
       );
       break;
     }
@@ -786,7 +837,7 @@ export async function scoreUnscoredEligibleFromDb(opts: {
       // ──────────────────────────────────────────────────────────
       // Pending-BV auto-pickup path: Tier-1 already done, run Tier-2
       // ──────────────────────────────────────────────────────────
-      const sonnetStatus = await checkSpend("score");
+      const sonnetStatus = await checkSpend(userId, "score");
       if (sonnetStatus.capReached || sonnetStatus.totalCapReached) {
         // Still can't verify. Leave the row alone (it'll be picked up
         // next tick or next month).
@@ -800,7 +851,7 @@ export async function scoreUnscoredEligibleFromDb(opts: {
         quick_take: m.tier1QuickTake ?? "",
         is_potential_bv: m.tier1IsPotentialBv ?? false,
       };
-      const result = await runTier2OnRow(m, tier1, rubric);
+      const result = await runTier2OnRow(userId, m, tier1, rubric);
       if (result === "ok") {
         scored++;
         pendingBvProcessed++;
@@ -815,21 +866,15 @@ export async function scoreUnscoredEligibleFromDb(opts: {
     // ──────────────────────────────────────────────────────────
     // Fresh row path: Tier-1 first, then maybe Tier-2
     // ──────────────────────────────────────────────────────────
-    const triageStatus = await checkSpend("triage");
+    const triageStatus = await checkSpend(userId, "triage");
     if (triageStatus.capReached || triageStatus.totalCapReached) {
-      // Triage cap reached — caller's policy is keyword_classifier
-      // fallback, which means leaving the existing classifier-set
-      // level alone. Skip without burning budget.
       console.warn(
-        `[fit] triage cap reached ($${triageStatus.spent.toFixed(2)}/$${triageStatus.cap.toFixed(2)}) — skipping ${m.companySlug}/${m.jobId}`,
+        `[fit] [user ${userId.slice(0, 8)}] triage cap reached ($${triageStatus.spent.toFixed(2)}/$${triageStatus.cap.toFixed(2)}) — skipping ${m.companySlug}/${m.jobId}`,
       );
       skipped++;
       continue;
     }
 
-    // Need the JD for the snippet. All four supported ATSs now expose
-    // a description path (Workday via per-job endpoint), so fetch
-    // failure means the role is gone or the ATS is down.
     const rawDesc = await fetchDescription(m.ats, m.companySlug, m.jobId);
     if (!rawDesc) {
       skipped++;
@@ -838,8 +883,9 @@ export async function scoreUnscoredEligibleFromDb(opts: {
     }
     const extracted = extractScoringText(rawDesc);
 
-    // Tier-1: Haiku triage.
+    // Tier-1: Haiku triage against THIS user's resume.
     const triageOut = await triageRoleWithHaiku({
+      userId,
       title: m.title,
       company: m.companyDisplayName,
       companySlug: m.companySlug,
@@ -849,37 +895,33 @@ export async function scoreUnscoredEligibleFromDb(opts: {
 
     if (!triageOut.ok) {
       console.warn(
-        `[fit] tier-1 failed for ${m.companySlug}/${m.jobId} (${triageOut.reason}) — falling back to classifier level`,
+        `[fit] [user ${userId.slice(0, 8)}] tier-1 failed for ${m.companySlug}/${m.jobId} (${triageOut.reason}) — skipping`,
       );
       errored++;
       continue;
     }
 
-    // Log triage api_usage row regardless of escalation decision.
-    await insertTriageUsage(m.id, triageOut);
+    await insertTriageUsage(userId, m.id, triageOut);
 
-    // Escalation decision.
-    const sonnetStatus = await checkSpend("score");
+    const sonnetStatus = await checkSpend(userId, "score");
     const sonnetCapReached =
       sonnetStatus.capReached || sonnetStatus.totalCapReached;
     const decision = decideEscalation(triageOut.tier1, caps, sonnetCapReached);
 
     if (decision.escalate) {
-      // Tier-2: Sonnet deep-score with Tier-1 context.
       const result = await runTier2OnRow(
+        userId,
         m,
         triageOut.tier1,
         rubric,
         extracted,
       );
-
       if (result === "ok") {
         scored++;
         console.log(
-          `[fit] match=${m.id.slice(0, 8)} haiku={score:${triageOut.tier1.tier1_score.toFixed(1)}, conf:${triageOut.tier1.confidence}, bv:${triageOut.tier1.is_potential_bv}} → escalate (${decision.reason}) — see next line`,
+          `[fit] match=${m.id.slice(0, 8)} user=${userId.slice(0, 8)} haiku={score:${triageOut.tier1.tier1_score.toFixed(1)}, conf:${triageOut.tier1.confidence}, bv:${triageOut.tier1.is_potential_bv}} → escalate (${decision.reason})`,
         );
       } else if (result === "skip_no_desc") {
-        // Shouldn't happen since we already fetched description, but defensive.
         skipped++;
       } else {
         errored++;
@@ -887,23 +929,19 @@ export async function scoreUnscoredEligibleFromDb(opts: {
       continue;
     }
 
-    // Not escalated. Persist Tier-1 only. Level capped at MEDIUM
-    // (HIGH/BV require Sonnet verification per the design).
     let level: Level;
     let pendingBv = false;
     if (decision.reason === "potential_bv_capped") {
-      // Sonnet cap hit + BV flagged. Persist as HIGH with pending flag
-      // so the next tick (or next month) picks it up via pop 1.
       level = "HIGH";
       pendingBv = true;
     } else {
       level = levelFromTier1(triageOut.tier1.tier1_score);
     }
 
-    await persistTier1Only(m.id, triageOut.tier1, level, pendingBv);
+    await persistTier1Only(userId, m.id, triageOut.tier1, level, pendingBv);
     triagedOnly++;
     console.log(
-      `[fit] match=${m.id.slice(0, 8)} haiku={score:${triageOut.tier1.tier1_score.toFixed(1)}, conf:${triageOut.tier1.confidence}, bv:${triageOut.tier1.is_potential_bv}} → no_escalate (${decision.reason}) → level:${level}${pendingBv ? " pending_bv=true" : ""}`,
+      `[fit] match=${m.id.slice(0, 8)} user=${userId.slice(0, 8)} haiku={score:${triageOut.tier1.tier1_score.toFixed(1)}, conf:${triageOut.tier1.confidence}, bv:${triageOut.tier1.is_potential_bv}} → no_escalate (${decision.reason}) → level:${level}${pendingBv ? " pending_bv=true" : ""}`,
     );
   }
 
@@ -924,8 +962,24 @@ export async function scoreUnscoredEligibleFromDb(opts: {
 // to re-fetch the JD).
 type Tier2Outcome = "ok" | "skip_no_desc" | "error";
 
+// Loose work-row shape — covers both Drizzle's $inferSelect for
+// matches and the joined-projection shape from
+// scoreUnscoredEligibleForUser. We only read the fields the function
+// needs.
+type WorkRow = {
+  id: string;
+  ats: typeof matches.$inferSelect.ats;
+  companySlug: string;
+  companyDisplayName: string;
+  jobId: string;
+  title: string;
+  location: string;
+  tier1Score: string | null;
+};
+
 async function runTier2OnRow(
-  m: typeof matches.$inferSelect,
+  userId: string,
+  m: WorkRow,
   tier1: Tier1Result,
   rubric: ScoringRubric,
   preFetchedDesc?: string,
@@ -936,7 +990,7 @@ async function runTier2OnRow(
   // trail stays intact regardless. Skip for the pending-BV-pickup path
   // where Tier-1 fields are already on the row.
   if (m.tier1Score == null) {
-    await writeTier1Fields(m.id, tier1);
+    await writeTier1Fields(userId, m.id, tier1);
   }
 
   let desc = preFetchedDesc;
@@ -951,6 +1005,7 @@ async function runTier2OnRow(
 
   const sector: Sector = await sectorForSlug(m.companySlug);
   const out = await scoreFitWithClaude({
+    userId,
     matchId: m.id,
     title: m.title,
     company: m.companyDisplayName,
@@ -971,6 +1026,7 @@ async function runTier2OnRow(
 
   try {
     await persistScore(
+      userId,
       m.id,
       out.fit,
       out.tokensIn,
@@ -993,17 +1049,18 @@ async function runTier2OnRow(
   }
 }
 
-// Write just the Tier-1 columns on a matches row. Used before
-// escalation so the audit trail lands even if Tier-2 fails. Does NOT
-// touch level — that's controlled by persistTier1Only (no escalation)
-// or persistScore (escalation).
+// Write Tier-1 columns on a user_matches row. Used before escalation
+// so the audit trail lands even if Tier-2 fails. Does NOT touch level
+// — that's controlled by persistTier1Only (no escalation) or
+// persistScore (escalation).
 async function writeTier1Fields(
+  userId: string,
   matchId: string,
   tier1: Tier1Result,
 ): Promise<void> {
   const db = getDb();
   await db
-    .update(matches)
+    .update(userMatches)
     .set({
       tier1Score: tier1.tier1_score.toFixed(1),
       tier1Confidence: tier1.confidence,
@@ -1011,13 +1068,13 @@ async function writeTier1Fields(
       tier1QuickTake: tier1.quick_take,
       updatedAt: sql`now()`,
     })
-    .where(eq(matches.id, matchId));
+    .where(and(eq(userMatches.userId, userId), eq(userMatches.matchId, matchId)));
 }
 
 // Persist Tier-1 results without a Tier-2 score. Updates level + Tier-1
-// columns; leaves fit_score NULL. Writes the api_usage row for the
-// triage call.
+// columns on user_matches; leaves fit_score NULL.
 async function persistTier1Only(
+  userId: string,
   matchId: string,
   tier1: Tier1Result,
   level: Level,
@@ -1025,7 +1082,7 @@ async function persistTier1Only(
 ): Promise<void> {
   const db = getDb();
   await db
-    .update(matches)
+    .update(userMatches)
     .set({
       tier1Score: tier1.tier1_score.toFixed(1),
       tier1Confidence: tier1.confidence,
@@ -1035,13 +1092,13 @@ async function persistTier1Only(
       level,
       updatedAt: sql`now()`,
     })
-    .where(eq(matches.id, matchId));
+    .where(and(eq(userMatches.userId, userId), eq(userMatches.matchId, matchId)));
 }
 
-// Insert the triage-purpose api_usage row. Tier-1 fields are also
-// written on the matches row separately. Cost ledger here tracks per-
-// purpose spend so checkSpend("triage") returns accurate monthly sums.
+// Insert the triage-purpose api_usage row. Scoped to this user so
+// checkSpend(userId, "triage") returns their accurate monthly sums.
 async function insertTriageUsage(
+  userId: string,
   matchId: string,
   out: {
     tokensIn: number;
@@ -1053,6 +1110,7 @@ async function insertTriageUsage(
 ): Promise<void> {
   const db = getDb();
   await db.insert(apiUsage).values({
+    userId,
     matchId,
     tokensIn: out.tokensIn + out.cacheReadTokens + out.cacheWriteTokens,
     tokensOut: out.tokensOut,
@@ -1060,12 +1118,6 @@ async function insertTriageUsage(
     model: "claude-haiku-4-5-20251001",
     purpose: "triage",
   });
-
-  // Also update the matches row with Tier-1 fields here so the data
-  // lands even if Tier-2 fails or is skipped. Persisting again from
-  // persistTier1Only is idempotent (last write wins on the same row).
-  // For the escalation path, persistScore() later overwrites level
-  // with Sonnet's level_recommendation.
 }
 
 // Decides whether a row appears in the daily digest. Wider than just
@@ -1118,6 +1170,7 @@ export function levelFromFit(score: number, flag: FitFlag): Level {
 // path (callers without Tier-1 escalation) — but the production
 // pipeline always has Sonnet's level_recommendation.
 export async function persistScore(
+  userId: string,
   matchId: string,
   fit: FitScore,
   tokensIn: number,
@@ -1128,7 +1181,7 @@ export async function persistScore(
 ): Promise<void> {
   const db = getDb();
   await db
-    .update(matches)
+    .update(userMatches)
     .set({
       fitScore: fit.score.toFixed(1),
       fitSummary: fit.summary,
@@ -1138,8 +1191,9 @@ export async function persistScore(
       pendingBvVerification: false,
       updatedAt: sql`now()`,
     })
-    .where(eq(matches.id, matchId));
+    .where(and(eq(userMatches.userId, userId), eq(userMatches.matchId, matchId)));
   await db.insert(apiUsage).values({
+    userId,
     matchId,
     tokensIn: tokensIn + (opts?.cacheReadTokens ?? 0) + (opts?.cacheWriteTokens ?? 0),
     tokensOut,

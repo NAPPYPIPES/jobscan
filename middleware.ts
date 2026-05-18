@@ -1,56 +1,52 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { verifySession } from "@/lib/auth/cookie";
+import { NextResponse } from "next/server";
+import NextAuth from "next-auth";
+import { authConfigEdge } from "@/lib/auth/config.edge";
 
-// Auth + role gate. If the session cookie is missing or doesn't verify
-// against AUTH_SECRET, redirect to /login. On success, propagate the
-// resolved role (owner | demo) to downstream handlers via the
-// `x-par-role` request header — server components + API routes read
-// that via headers() to branch behavior cheaply, without re-running
-// HMAC verification per request.
+// Auth gate. Replaces the prior HMAC-cookie + role-header system with
+// NextAuth v5's JWT session. The Edge runtime decodes the JWT via the
+// Auth.js secret (env AUTH_SECRET) — no DB call needed in middleware.
 //
-// Cron and login endpoints are bypassed via the matcher below.
+// On success: forwards the user id on the `x-par-user-id` request
+// header so server components and API routes can scope reads/writes
+// to the current user via headers().
 //
-// Failure modes:
-//   - AUTH_SECRET unset in production → fail closed (redirect to /login;
-//     login also won't work since PERSONAL_PASS is presumably also unset,
-//     so the site is inaccessible until both are set — intentional).
-//   - AUTH_SECRET unset in dev → fail open with a warning so local dev
-//     isn't blocked before the env vars are wired up. Treats the dev-
-//     bypass viewer as 'owner' so all features remain reachable.
-export async function middleware(req: NextRequest) {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    if (process.env.NODE_ENV !== "production") {
-      console.warn("[auth] AUTH_SECRET not set — middleware bypassing in dev");
-      const res = NextResponse.next();
-      res.headers.set("x-par-role", "owner");
-      return res;
-    }
-    return NextResponse.redirect(new URL("/login", req.url));
+// Bypassed routes (see matcher below):
+//   /api/cron/*           — guarded by CRON_SECRET bearer
+//   /api/auth/*           — NextAuth's own sign-in / callback / etc.
+//   /login, /signup       — the auth UI itself
+//   /_next/static, ...    — build assets
+//
+// Onboarding redirect (new users who haven't finished the wizard) is
+// NOT enforced here — middleware can't hit the DB on Edge to check
+// user_extras.onboarding_completed_at. Instead, app/layout.tsx runs a
+// server-side check and redirects to /onboarding when needed.
+
+const { auth } = NextAuth(authConfigEdge);
+
+export default auth((req) => {
+  if (!req.auth) {
+    const loginUrl = new URL("/login", req.nextUrl);
+    return NextResponse.redirect(loginUrl);
   }
-  const cookie = req.cookies.get("par_session")?.value ?? "";
-  const role = await verifySession(cookie, secret);
-  if (!role) {
-    return NextResponse.redirect(new URL("/login", req.url));
-  }
-  // Setting the header on the *request* (not the response) makes it
-  // visible to server components and route handlers via headers(),
-  // which is what we want. NextResponse.next({ request: { headers } })
-  // is the documented way to mutate request headers from middleware.
+  const userId = (req.auth.user as { id?: string } | undefined)?.id;
   const requestHeaders = new Headers(req.headers);
-  requestHeaders.set("x-par-role", role);
+  if (userId) requestHeaders.set("x-par-user-id", userId);
+  // Forward the pathname so the root layout can decide whether to
+  // bounce a new user to /onboarding (layouts can't see the URL via
+  // Next.js's headers() helper without this).
+  requestHeaders.set("x-par-pathname", req.nextUrl.pathname);
   return NextResponse.next({ request: { headers: requestHeaders } });
-}
+});
 
 export const config = {
   matcher: [
     // Run on everything EXCEPT:
     //  - /api/cron/*       (already guarded by CRON_SECRET bearer token)
-    //  - /api/auth/login   (the login POST itself)
-    //  - /login            (the login page)
+    //  - /api/auth/*       (NextAuth's own endpoints; manages its own auth)
+    //  - /login, /signup   (the auth UI itself)
     //  - /_next/static/*   (build assets)
     //  - /_next/image/*    (image optimizer)
     //  - /favicon*         (favicon requests)
-    "/((?!api/cron|api/auth/login|login|_next/static|_next/image|favicon).*)",
+    "/((?!api/cron|api/auth|login|signup|_next/static|_next/image|favicon).*)",
   ],
 };

@@ -6,7 +6,7 @@
 // for demo role, but a crafted POST shouldn't bypass).
 
 import { revalidatePath } from "next/cache";
-import { getViewerRole } from "@/lib/auth/viewer";
+import { getViewerRole, getViewerUserId } from "@/lib/auth/viewer";
 import { replaceScoringCaps } from "@/db/scoring-caps";
 import type { ScoringCaps } from "@/lib/config/scoring-caps-types";
 
@@ -17,9 +17,11 @@ export async function updateScoringCapsAction(
   if (role === "demo") {
     return { ok: false, error: "Demo viewer — read-only access" };
   }
+  const userId = await getViewerUserId();
+  if (!userId) return { ok: false, error: "Not signed in" };
 
   try {
-    await replaceScoringCaps(caps);
+    await replaceScoringCaps(userId, caps);
     revalidatePath("/docs");
     return { ok: true };
   } catch (err) {

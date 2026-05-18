@@ -12,12 +12,28 @@ const LINKS = [
   { href: "/docs", label: "Docs" },
 ];
 
+async function signOut() {
+  // Hit NextAuth's sign-out endpoint with a CSRF token. Done as a
+  // POST to /api/auth/signout — NextAuth clears the session cookie
+  // and the next request hits middleware unauthenticated, which
+  // redirects to /login.
+  const csrfRes = await fetch("/api/auth/csrf");
+  const { csrfToken } = (await csrfRes.json()) as { csrfToken?: string };
+  const form = new FormData();
+  if (csrfToken) form.set("csrfToken", csrfToken);
+  form.set("callbackUrl", "/login");
+  await fetch("/api/auth/signout", { method: "POST", body: form });
+  window.location.href = "/login";
+}
+
 export default function Nav() {
   const pathname = usePathname();
-  // Hide on the login page — pre-auth visitors shouldn't see the
-  // route list (and clicking any link from /login just bounces them
-  // right back).
-  if (pathname === "/login") return null;
+  // Hide on the login/signup/onboarding pages — pre-auth and mid-
+  // onboarding visitors shouldn't see the post-auth nav (and clicking
+  // any link just bounces them right back).
+  if (pathname === "/login" || pathname === "/signup" || pathname.startsWith("/onboarding")) {
+    return null;
+  }
   return (
     <header className="sticky top-0 z-20 border-b border-line/60 bg-canvas/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-3 py-3 sm:gap-3 sm:px-6 sm:py-4">
@@ -56,6 +72,14 @@ export default function Nav() {
             })}
           </nav>
           <ThemeToggle />
+          <button
+            type="button"
+            onClick={signOut}
+            aria-label="Sign out"
+            className="shrink-0 rounded-full border border-line px-3 py-1.5 text-xs font-medium tracking-tight text-fg-muted transition-colors hover:text-fg"
+          >
+            Sign out
+          </button>
         </div>
       </div>
     </header>

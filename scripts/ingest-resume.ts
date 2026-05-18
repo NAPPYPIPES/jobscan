@@ -1,6 +1,7 @@
 // Parses docs/resume.md into the user_profile table via one Claude
 // Haiku call. Overwrites any existing profile row — there's only ever
-// one. Cost: ~$0.01 per run. Re-run any time you update the resume.
+// one per user (the maintainer for this CLI). Cost: ~$0.01 per run.
+// Re-run any time you update the resume.
 //
 // Usage:
 //   npm run ingest-resume
@@ -9,84 +10,16 @@
 //   - docs/resume.md exists (see docs/resume.example.md for the
 //     recommended structure)
 //   - .env.local has ANTHROPIC_API_KEY and DATABASE_URL set
-//   - The user_profile table exists (run `npx drizzle-kit push` first)
+//   - migrations 0001-0004 have been applied
 
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local" });
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import Anthropic from "@anthropic-ai/sdk";
 import { replaceUserProfile } from "../db/profile";
-
-const MODEL = "claude-haiku-4-5-20251001";
-const INPUT_PER_MTOK = 1.0;
-const OUTPUT_PER_MTOK = 5.0;
-
-const SYSTEM_PROMPT = `You extract a candidate's resume into a structured JSON profile that downstream job-scoring prompts will read on every API call.
-
-Output exactly this JSON shape, no other text:
-{
-  "parsed_summary": "<250-350 words>",
-  "years_experience": <integer or null>,
-  "industries": ["<industry>", ...],
-  "functions": ["<function>", ...],
-  "seniority_level": "<one short phrase like 'VP/Director' or 'Senior IC' or null>",
-  "target_roles": ["<role>", ...],
-  "hard_exclusions": ["<exclusion>", ...]
-}
-
-Rules:
-- parsed_summary: 250-350 words. Write as if it were a candidate brief Claude will re-read at the top of every scoring call. Name the strongest 2-3 industry/function combos, the seniority bands the candidate is qualified for, what they explicitly do NOT want. Be concrete — name specific companies, dollar amounts, product categories from their resume. No fluff.
-- years_experience: total professional years, integer. Null if unstated.
-- industries: 2-6 specific industries the candidate has worked in (e.g. "Enterprise SaaS", "Financial Services", "Healthcare AI"). Not generic ("Technology").
-- functions: 2-5 functional areas the candidate has performed (e.g. "Sales leadership", "GTM strategy", "Business Value Consulting"). Not generic ("Management").
-- seniority_level: one phrase describing the candidate's current tier ("VP/Director", "C-suite", "Senior IC", etc.). Null if unstated.
-- target_roles: 3-8 specific role titles the candidate is targeting next. Pull from a "Target Roles" or "Looking For" section if present; otherwise infer from their trajectory.
-- hard_exclusions: things the candidate has explicitly said they do NOT want — industry verticals, role types, geographic constraints. Empty array if the resume names no exclusions.`;
-
-function parseResponse(text: string): {
-  parsedSummary: string;
-  yearsExperience: number | null;
-  industries: string[];
-  functions: string[];
-  seniorityLevel: string | null;
-  targetRoles: string[];
-  hardExclusions: string[];
-} | null {
-  // Strip markdown fences if Haiku wraps the JSON.
-  let body = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object") return null;
-  const p = parsed as Record<string, unknown>;
-
-  const str = (v: unknown): string | null =>
-    typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
-  const intOrNull = (v: unknown): number | null =>
-    typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
-  const strArr = (v: unknown): string[] =>
-    Array.isArray(v)
-      ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((s) => s.trim())
-      : [];
-
-  const parsedSummary = str(p.parsed_summary);
-  if (!parsedSummary) return null;
-
-  return {
-    parsedSummary,
-    yearsExperience: intOrNull(p.years_experience),
-    industries: strArr(p.industries),
-    functions: strArr(p.functions),
-    seniorityLevel: str(p.seniority_level),
-    targetRoles: strArr(p.target_roles),
-    hardExclusions: strArr(p.hard_exclusions),
-  };
-}
+import { MAINTAINER_USER_ID } from "../lib/auth/maintainer";
+import { parseResumeWithClaude, RESUME_PARSE_MODEL } from "../lib/profile/parse-resume";
 
 async function main() {
   const resumePath = path.join(process.cwd(), "docs", "resume.md");
@@ -111,48 +44,19 @@ async function main() {
     process.exit(1);
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  if (!process.env.ANTHROPIC_API_KEY) {
     console.error("ANTHROPIC_API_KEY not set in .env.local");
     process.exit(1);
   }
 
-  console.log(
-    `Parsing resume (${resumeMd.length} chars) via ${MODEL}…`,
-  );
+  console.log(`Parsing resume (${resumeMd.length} chars) via ${RESUME_PARSE_MODEL}…`);
 
-  const client = new Anthropic({ apiKey });
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1500,
-    temperature: 0.1,
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: `Resume to parse:\n\n${resumeMd}`,
-      },
-    ],
-  });
+  const { parsed, tokensIn, tokensOut, costUsd } = await parseResumeWithClaude(resumeMd);
 
-  const tokensIn = response.usage.input_tokens;
-  const tokensOut = response.usage.output_tokens;
-  const costUsd =
-    (tokensIn / 1_000_000) * INPUT_PER_MTOK +
-    (tokensOut / 1_000_000) * OUTPUT_PER_MTOK;
-
-  const text = response.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-
-  const parsed = parseResponse(text);
-  if (!parsed) {
-    console.error(`\nClaude returned an unparseable response:\n${text.slice(0, 500)}\n`);
-    process.exit(1);
-  }
-
-  const saved = await replaceUserProfile({
+  // CLI = maintainer. New users edit their resume via the
+  // onboarding wizard which calls replaceUserProfile with the
+  // signed-in user's id.
+  const saved = await replaceUserProfile(MAINTAINER_USER_ID, {
     rawResumeMd: resumeMd,
     parsedSummary: parsed.parsedSummary,
     yearsExperience: parsed.yearsExperience,

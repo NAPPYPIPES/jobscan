@@ -3,7 +3,8 @@ import { getDb } from "@/db/client";
 import { apiUsage, matches } from "@/db/schema";
 import { getTargets } from "@/db/targets";
 import { getManualCompanies } from "@/db/manual-companies";
-import { getViewerRole } from "@/lib/auth/viewer";
+import { redirect } from "next/navigation";
+import { getViewerRole, getViewerUserId } from "@/lib/auth/viewer";
 import { DEMO_SLUGS_ARRAY } from "@/lib/auth/demo-allowlist";
 import type { Sector } from "@/lib/scan/types";
 import { DEFAULT_RUBRIC } from "@/lib/fit/rubric";
@@ -25,6 +26,8 @@ const ATS_LABEL: Record<string, string> = {
 };
 
 export default async function Docs() {
+  const userId = await getViewerUserId();
+  if (!userId) redirect("/login");
   const db = getDb();
   const viewerRole = await getViewerRole();
   const isDemo = viewerRole === "demo";
@@ -46,10 +49,10 @@ export default async function Docs() {
   ] = await Promise.all([
     getTargets({ role: viewerRole }),
     getManualCompanies(),
-    getScoringCaps(),
-    checkSpend("triage"),
-    checkSpend("score"),
-    checkSpend("summary"),
+    getScoringCaps(userId),
+    checkSpend(userId, "triage"),
+    checkSpend(userId, "score"),
+    checkSpend(userId, "summary"),
   ]);
   // Inline sector helper using the fetched rows — avoids touching the
   // db/targets module-level helper which would do a separate (cached)
