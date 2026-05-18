@@ -25,7 +25,8 @@ jobs:
     steps:
       - name: Scan target companies
         run: |
-          curl --fail --silent --show-error \
+          curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-delay 15 --retry-all-errors \
             -H "Authorization: Bearer $CRON_SECRET" \
             "$SITE_URL/api/cron/scan"
         env:
@@ -34,7 +35,8 @@ jobs:
 
       - name: Score new BV/HIGH/MEDIUM rows
         run: |
-          curl --fail --silent --show-error \
+          curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-delay 15 --retry-all-errors \
             -H "Authorization: Bearer $CRON_SECRET" \
             "$SITE_URL/api/cron/score"
         env:
@@ -47,7 +49,8 @@ jobs:
     steps:
       - name: Send daily digest email
         run: |
-          curl --fail --silent --show-error \
+          curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-delay 15 --retry-all-errors \
             -H "Authorization: Bearer $CRON_SECRET" \
             "$SITE_URL/api/cron/digest"
         env:
