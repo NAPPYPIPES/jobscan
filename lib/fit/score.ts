@@ -223,23 +223,54 @@ Flags that force a 0.0 overall score (set the matching flag and also drop the in
   ${exclusions}
 
 ================================================================
+ALIGNMENT GUIDANCE — read this first
+================================================================
+Your authority comes from comparing the JD's required skills and
+responsibilities to the candidate's actual resume work history and Skills
+section — NOT from title-pattern matching alone. A "Director, Sales"
+title can be a strong fit or a weak fit depending on whether the JD's
+required skills appear in the resume.
+
+Use this lens for both function scoring AND level_recommendation:
+
+  - JD's required skills + responsibilities show direct overlap with
+    demonstrated work on the resume → score function high, lean HIGH.
+  - Adjacent skills, transferable but not exact → score function 6-8,
+    lean MEDIUM.
+  - Required skills mostly absent from the resume → score function low,
+    lean LOW even if the title looks adjacent.
+
+Title matters but is secondary. The "ic_role" and
+"partnerships_specialist" flags below are SOFT guidance — they nudge
+toward MEDIUM by default, but you have authority to override when the
+resume↔JD alignment is unusually strong (or unusually weak).
+
+================================================================
 FLAG RULES — set exactly one
 ================================================================
-- "healthcare_excluded": role is healthcare-focused — drop industry to 0 and set this flag.
+- "healthcare_excluded": role is healthcare-focused — drop industry to 0 and set this flag. HARD: forces level_recommendation = LOW and composite = 0.
 - "relocation_required": role is NOT in NYC, NYC metro (Westchester, Long Island, Northern NJ commute corridor, southern CT), OR US-remote. Set this whenever:
     (a) The location field names a non-NYC US city (SF, LA, Austin, Boston, Chicago, Seattle, Denver, Atlanta, Dallas, Miami, DC-only, Portland, etc.) without a remote / NYC-hybrid option, OR
     (b) The role is anchored to a non-Northeast US region (Account Executive - West, RVP Pacific Northwest, Sales Director - Bay Area, Account Manager LATAM, Strategic Sales EMEA, etc.) — even if the location field looks generous, the title carries the constraint, OR
     (c) The role requires international relocation (UK, Germany, Singapore, India, EMEA broadly, APAC, etc.).
-   Setting this flag forces the composite score to 0.
+   HARD: forces level_recommendation = LOW and composite = 0.
 - "level_mismatch": role is below the candidate's target seniority. Set this WHENEVER the title contains any of:
     - "Analyst" at any level (Senior Analyst, Principal Analyst, Strategic Analyst, GTM Analyst, Sales Strategy Analyst, etc.) — even Principal Analyst is IC analytical work, NOT a leadership role for this candidate.
     - "Representative" / "Rep" (Sales Rep, Account Rep, Partner Development Representative, etc.).
     - "Coordinator", "Associate" (any level), "Junior" / "Jr.", "Specialist" without a Director/VP/Head leadership modifier, "Intern", "Fellow", "Apprentice", "Entry-level", "Mid-level IC".
     - YOE requirement of 0-3 years.
-   These are TITLE-LEVEL hard rules — don't soften them based on a strong JD; the candidate categorically would not pursue these. When this flag is set, level_recommendation MUST be LOW.
-- "ic_role": individual-contributor sales role (AE, Sales Rep) with no team-management scope. Consumer applies the IC cap automatically.
-- "bv_role": role's primary function is Business Value Consulting / Value Engineering per the title patterns above AND seniority is Director-and-above or staff-IC. Set whenever level_recommendation = "BV".
-- "partnerships_specialist": title contains "Partnerships" or "Alliances" — softer match.
+   These are TITLE-LEVEL hard rules — don't soften them based on a strong JD; the candidate categorically would not pursue these. HARD: forces level_recommendation = LOW.
+- "ic_role": individual-contributor sales role (AE, Sales Rep) with no team-management scope. SOFT default = MEDIUM. Use your judgment to elevate to HIGH when ALL of these hold:
+    (a) the JD's required skills (enterprise sales motion, multi-stakeholder deals, ROI/value-based selling, executive-level customer relationships) line up explicitly with the candidate's resume work history, AND
+    (b) the company is a tier-1 target (AI-native, top fintech, enterprise SaaS leader, or financial-services where the candidate has direct background), AND
+    (c) the deal scope is enterprise / strategic (not mid-market / SMB).
+  Demote to LOW when the role is clearly mid-market/SMB AE work or the JD's required skills don't appear in the resume. Consumer still applies the numerical IC score cap automatically — that's separate from the level call.
+- "bv_role": role's primary function is Business Value Consulting / Value Engineering per the title patterns above AND seniority is Director-and-above or staff-IC. Set whenever level_recommendation = "BV". HARD: forces level_recommendation = BV.
+- "partnerships_specialist": title contains "Partnerships" or "Alliances". SOFT default = MEDIUM. Elevate to HIGH when ALL of these hold:
+    (a) strategic alliances scope at director+ with team-management responsibility, AND
+    (b) the candidate's resume shows directly transferable partner / channel / GSI experience, AND
+    (c) the alliance is revenue-driving (not pure implementation / program management).
+  Demote to LOW for purely ops / implementation / program-management partner roles, OR when the alliance scope is far from the candidate's demonstrated experience.
 - "none": none of the above.
 
 ================================================================
@@ -252,26 +283,33 @@ BV — assign ONLY if:
   (b) seniority is Director-and-above OR staff-IC equivalent (Principal / Staff / Lead / Senior Principal).
   Do NOT inflate other strong-fit roles to BV — they are HIGH instead. When in doubt about title fit for BV, assign HIGH. BV is rare by design.
 
-HIGH — strong fits across function + seniority + industry that are NOT BV-specific. Examples:
+HIGH — strong alignment across function + seniority + industry, AND the JD's required skills clearly map to the candidate's resume. Use HIGH whenever:
+  - Function + seniority + industry dimensions are all 8+, AND
+  - The composite weighted score is 8.5+ with no hard exclusion flag, AND
+  - You'd actively recommend the candidate pursue this role.
+  Examples:
   - VP GTM / VP Sales / VP Revenue at an AI-native or enterprise SaaS company
   - Head of Strategic Sales in financial services
-  - Director of Enterprise Sales at Series B-D
+  - Director of Enterprise Sales at Series B-D where the JD names enterprise sales motion, ROI quantification, and exec-level customer relationships (all present in the resume)
   - "Value Consultant" at Manager level (matches function but missing seniority for BV)
+  - An IC AE role at a tier-1 AI company where the JD's required skills match the resume's enterprise sales motion (per the "ic_role" elevation rule above)
+  When the composite is 8.5+ with flag = "none", default to HIGH unless there's a specific dimension misalignment you can name that justifies MEDIUM.
 
-MEDIUM — one or two dimensions clearly off but worth surfacing:
+MEDIUM — meaningful fit on most dimensions but with at least one clear gap, OR a flagged role where the resume↔JD alignment is solid but not strong enough to elevate:
   - Right function, wrong stage
-  - Right seniority, adjacent function
+  - Right seniority, adjacent function (CS / RevOps / Sales Strategy when target is direct sales leadership)
   - Right function + seniority, weak industry fit
+  - ic_role / partnerships_specialist where alignment is solid but doesn't clear the HIGH bar above
 
-LOW — adjacent or stretched roles not worth alerting on, or hard exclusions.
+LOW — adjacent or stretched roles not worth alerting on, OR hard exclusions, OR the JD's required skills don't overlap meaningfully with the resume even though the title looks adjacent.
 
 Internal consistency required:
   - flag = "bv_role"             → level_recommendation = "BV"
   - flag = "healthcare_excluded" → level_recommendation = "LOW"
   - flag = "level_mismatch"      → level_recommendation = "LOW"
-  - flag = "ic_role"             → level_recommendation ≤ "MEDIUM"
   - flag = "relocation_required" → level_recommendation = "LOW"
-  - flag = "partnerships_specialist" → level_recommendation ≤ "MEDIUM"
+  - flag = "ic_role"             → MEDIUM default; HIGH / LOW allowed per the soft rule above. Justify any non-MEDIUM call in the summary.
+  - flag = "partnerships_specialist" → MEDIUM default; HIGH / LOW allowed per the soft rule above. Justify any non-MEDIUM call in the summary.
 
 ================================================================
 BV DIMENSION CALIBRATION — OVERRIDE FOR BV-PATTERN ROLES
@@ -637,12 +675,16 @@ function parseFitJson(text: string, rubric: ScoringRubric): FitScore | null {
   };
   const f_flag = flag as FitFlag;
 
-  // Internal-consistency enforcement. If the model emitted an
-  // inconsistent flag + level pair, log a warning and prefer the
-  // level_recommendation (the redesigned authority). The model's
-  // flag stays as-is for filtering purposes (e.g. ic_role still
-  // applies the IC cap deterministically), but the level reflects
-  // Sonnet's higher-order judgment.
+  // Internal-consistency enforcement. Hard flags (bv_role, healthcare,
+  // relocation, level_mismatch) still force a specific level — those
+  // are policy decisions. ic_role and partnerships_specialist are now
+  // SOFT in the prompt — Sonnet can elevate them to HIGH or drop them
+  // to LOW based on resume↔JD alignment, so no code-side cap. The
+  // numerical IC score cap (rubric.icRoleCap) still applies via
+  // computeScore() as a separate guard.
+  //
+  // BV → BV upgrade is still allowed: if Sonnet flags bv_role it must
+  // mean BV; downgrades to anything else would silently lose BV signal.
   if (f_flag === "bv_role" && levelRecommendation !== "BV") {
     console.warn(
       `[fit] flag=bv_role but level_recommendation=${levelRecommendation} — overriding level to BV`,
@@ -659,15 +701,6 @@ function parseFitJson(text: string, rubric: ScoringRubric): FitScore | null {
       `[fit] flag=${f_flag} but level_recommendation=${levelRecommendation} — overriding level to LOW`,
     );
     levelRecommendation = "LOW";
-  }
-  if (
-    (f_flag === "ic_role" || f_flag === "partnerships_specialist") &&
-    (levelRecommendation === "BV" || levelRecommendation === "HIGH")
-  ) {
-    console.warn(
-      `[fit] flag=${f_flag} but level_recommendation=${levelRecommendation} — capping at MEDIUM`,
-    );
-    levelRecommendation = "MEDIUM";
   }
 
   // BV without reasoning is a contract violation — Sonnet must justify
@@ -783,6 +816,15 @@ export async function scoreUnscoredEligibleForUser(
   // Pop 2: Tier-1 not yet run for this user. Per-user tier1_score
   // means each user does their own Tier-1 pass against their own
   // resume.
+  //
+  // FIFO by first_seen (oldest unscored first). Previously DESC, which
+  // starved older rows: each scan adds ~50 fresh rows/day and the cron
+  // tick limit (8) couldn't drain them faster than they arrived, so
+  // rows that didn't make the first 8 in their initial tick never got
+  // scored. With ASC, the cron services the longest-waiting row first
+  // within each level. Steady-state drain rate (192/day) > add rate, so
+  // freshly-added rows still get scored within hours; the bias just
+  // prevents permanent starvation of the queue tail.
   const fresh = await db
     .select(joinedSelect)
     .from(userMatches)
@@ -798,7 +840,7 @@ export async function scoreUnscoredEligibleForUser(
         isNull(matches.closedAt),
       ),
     )
-    .orderBy(desc(matches.firstSeen));
+    .orderBy(matches.firstSeen);
 
   // Process pending BV first (high-value), then fresh sorted by level
   // so BV/HIGH classifier candidates score first within budget.
@@ -1124,9 +1166,14 @@ async function insertTriageUsage(
 // "level IN (BV, HIGH)": lets fit_score above alertThreshold in even
 // when level is MEDIUM (a classifier-MEDIUM that Claude scored at 7.7
 // is a strong match worth showing — the levelFromFit HIGH threshold
-// of 8.0 leaves these out of the level column). Flag-driven
-// suppressions take precedence so an IC sales role can't sneak through
-// on score alone.
+// of 8.0 leaves these out of the level column).
+//
+// Flag suppressions: hard exclusions and level_mismatch are categorical
+// rejects — never alert. ic_role is NO LONGER auto-suppressed: under
+// the soft-flag rules, Sonnet can elevate strong-fit IC AE roles to
+// HIGH or keep them at MEDIUM with high score; either way they should
+// surface if the alignment is there. The score / level check below
+// gates them naturally — weak-fit IC roles land at LOW.
 export function shouldAlert(
   row: {
     level: Level;
@@ -1137,7 +1184,6 @@ export function shouldAlert(
 ): boolean {
   if (row.fitFlag && rubric.hardExclusions.includes(row.fitFlag)) return false;
   if (row.fitFlag === "level_mismatch") return false;
-  if (row.fitFlag === "ic_role") return false;
 
   if (row.fitFlag === "bv_role") return true;
 
