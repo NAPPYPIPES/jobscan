@@ -17,7 +17,7 @@ export default async function Home() {
   const viewerRole = await getViewerRole();
   const [matches, targets] = await Promise.all([
     getActiveMatches(userId, { excludeApplied: true, excludeBaseline: true }),
-    getTargets({ role: viewerRole }),
+    getTargets(),
   ]);
 
   // Slug → sector dict, built server-side and passed to the client.

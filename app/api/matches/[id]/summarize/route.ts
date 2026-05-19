@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { apiUsage, matches, roleSummaries } from "@/db/schema";
+import { apiUsage, matches, roleSummaries, userMatches } from "@/db/schema";
 import { extractScoringText, fetchDescription } from "@/lib/fit/fetch-description";
 import { getCompanyDescription, getCurrentMonthSpend } from "@/lib/fit/score";
 import { CURRENT_PROMPT_VERSION, generateSummary } from "@/lib/fit/summary-prompt";
@@ -59,9 +59,26 @@ async function handlePost(
   const force = url.searchParams.get("force") === "true";
   const db = getDb();
 
+  // Pull the global match row + the viewer's per-user level so the
+  // LOW-role gate operates on the viewer's user_matches state (level
+  // is per-user now — same match can be HIGH for one user, MED for
+  // another based on resume fit).
   const matchRows = await db
-    .select()
+    .select({
+      id: matches.id,
+      ats: matches.ats,
+      companySlug: matches.companySlug,
+      companyDisplayName: matches.companyDisplayName,
+      jobId: matches.jobId,
+      title: matches.title,
+      location: matches.location,
+      level: userMatches.level,
+    })
     .from(matches)
+    .innerJoin(
+      userMatches,
+      and(eq(userMatches.matchId, matches.id), eq(userMatches.userId, userId)),
+    )
     .where(eq(matches.id, id))
     .limit(1);
   const m = matchRows[0];

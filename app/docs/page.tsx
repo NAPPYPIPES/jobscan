@@ -1,11 +1,9 @@
-import { and, desc, eq, gte, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { apiUsage, matches } from "@/db/schema";
-import { getTargets } from "@/db/targets";
+import { apiUsage, matches, targets as targetsTable, userMatches, userTargets } from "@/db/schema";
 import { getManualCompanies } from "@/db/manual-companies";
 import { redirect } from "next/navigation";
 import { getViewerRole, getViewerUserId } from "@/lib/auth/viewer";
-import { DEMO_SLUGS_ARRAY } from "@/lib/auth/demo-allowlist";
 import type { Sector } from "@/lib/scan/types";
 import { DEFAULT_RUBRIC } from "@/lib/fit/rubric";
 import type { Level } from "@/lib/scan/types";
@@ -31,14 +29,12 @@ export default async function Docs() {
   const db = getDb();
   const viewerRole = await getViewerRole();
   const isDemo = viewerRole === "demo";
-  const demoSlugFilter = isDemo
-    ? [inArray(matches.companySlug, DEMO_SLUGS_ARRAY as string[])]
-    : [];
 
-  // Pre-fetch targets + manual list + scoring caps + spend status from
-  // DB. All cached in their respective db/* modules so this is sub-ms
-  // on warm requests. Demo viewers see the curated targets subset;
-  // manual list is the same for both. Caps are read-only for demo.
+  // Pre-fetch the viewer's watchlist (join user_targets → targets) +
+  // manual list + scoring caps + spend status. Per-user scoping replaces
+  // the prior role-based slug-allowlist filter — demo's curated subset
+  // now lives in user_targets, seeded by migration 0006. Sub-ms once
+  // db/* caches are warm.
   const [
     targets,
     manualCompanies,
@@ -47,7 +43,17 @@ export default async function Docs() {
     scoreSpend,
     summarySpend,
   ] = await Promise.all([
-    getTargets({ role: viewerRole }),
+    db
+      .select({
+        slug: targetsTable.slug,
+        ats: targetsTable.ats,
+        displayName: targetsTable.displayName,
+        sector: targetsTable.sector,
+        stage: targetsTable.stage,
+      })
+      .from(userTargets)
+      .innerJoin(targetsTable, eq(targetsTable.slug, userTargets.targetSlug))
+      .where(eq(userTargets.userId, userId)),
     getManualCompanies(),
     getScoringCaps(userId),
     checkSpend(userId, "triage"),
@@ -63,18 +69,22 @@ export default async function Docs() {
   const sectorForSlug = (slug: string): Sector =>
     sectorByTargetSlug.get(slug) ?? "tech";
 
+  // Per-user role count + freshness per company slug. Joins
+  // user_matches → matches so closed_at + lastSeen come from the
+  // global catalog while status filtering stays per-user.
   const perSlug = await db
     .select({
       companySlug: matches.companySlug,
       count: sql<number>`count(*)::int`,
       lastSeen: sql<string | null>`max(${matches.lastSeen})`,
     })
-    .from(matches)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
-        ne(matches.status, "dismissed"),
+        eq(userMatches.userId, userId),
+        ne(userMatches.status, "dismissed"),
         isNull(matches.closedAt),
-        ...demoSlugFilter,
       ),
     )
     .groupBy(matches.companySlug);
@@ -122,6 +132,10 @@ export default async function Docs() {
       spendUsd: parseFloat(r.total),
     }));
 
+    // Title + company come from the global matches catalog; fitScore
+    // comes from the viewer's user_matches row (per-user state). Both
+    // joins are LEFT — older api_usage rows might lack a match_id or
+    // their user_matches row may have been deleted.
     recentCalls = await db
       .select({
         calledAt: apiUsage.calledAt,
@@ -132,28 +146,38 @@ export default async function Docs() {
         purpose: apiUsage.purpose,
         title: matches.title,
         companyDisplayName: matches.companyDisplayName,
-        fitScore: matches.fitScore,
+        fitScore: userMatches.fitScore,
       })
       .from(apiUsage)
       .leftJoin(matches, eq(apiUsage.matchId, matches.id))
+      .leftJoin(
+        userMatches,
+        and(
+          eq(userMatches.matchId, apiUsage.matchId),
+          eq(userMatches.userId, apiUsage.userId),
+        ),
+      )
+      .where(eq(apiUsage.userId, userId))
       .orderBy(desc(apiUsage.calledAt))
       .limit(20);
   }
 
-  // Scanner stats — totals + per-level breakdown. Closed rows
-  // excluded so "Total open" matches what /all actually displays.
-  // Demo viewers see the same KPIs but scoped to their allowlist.
+  // Per-user scanner stats — totals + per-level breakdown. Closed rows
+  // excluded so "Total open" matches what /all actually displays for
+  // this viewer. Demo viewers see KPIs scoped to their user_matches
+  // seed (migration 0006), not via any slug allowlist.
   const totalsRows = await db
     .select({
       total: sql<number>`count(*)::int`,
-      scored: sql<number>`count(${matches.fitScore})::int`,
+      scored: sql<number>`count(${userMatches.fitScore})::int`,
     })
-    .from(matches)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
-        ne(matches.status, "dismissed"),
+        eq(userMatches.userId, userId),
+        ne(userMatches.status, "dismissed"),
         isNull(matches.closedAt),
-        ...demoSlugFilter,
       ),
     );
   const total = totalsRows[0]?.total ?? 0;
@@ -161,25 +185,32 @@ export default async function Docs() {
 
   const byLevelRows = await db
     .select({
-      level: matches.level,
+      level: userMatches.level,
       count: sql<number>`count(*)::int`,
     })
-    .from(matches)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
-        ne(matches.status, "dismissed"),
+        eq(userMatches.userId, userId),
+        ne(userMatches.status, "dismissed"),
         isNull(matches.closedAt),
-        ...demoSlugFilter,
       ),
     )
-    .groupBy(matches.level);
+    .groupBy(userMatches.level);
   const byLevel: Record<Level, number> = { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
   for (const r of byLevelRows) byLevel[r.level as Level] = r.count;
 
+  // Last-scan timestamp is GLOBAL — matches.lastSeen tracks when the
+  // cron last touched a row, not anything per-user. Scoped to the
+  // viewer's watched targets so the demo doesn't see "last scan
+  // touched <random target you don't watch>" — joins user_matches to
+  // restrict to slugs the viewer has subscribed to.
   const lastScanRows = await db
     .select({ ts: sql<string | null>`max(${matches.lastSeen})` })
-    .from(matches)
-    .where(isDemo ? and(...demoSlugFilter) : undefined);
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
+    .where(eq(userMatches.userId, userId));
   const lastScan = lastScanRows[0]?.ts;
 
   return (

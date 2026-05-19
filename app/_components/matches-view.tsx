@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Level, Sector } from "@/lib/scan/types";
-import type { Role } from "@/lib/auth/cookie";
+import type { Role } from "@/lib/auth/viewer";
 import FilterBar, { type Since, type Sort, ALL_SORTS } from "./filter-bar";
 import MatchCard, { type MatchWithUrl } from "./match-card";
 import CompanyHeader from "./company-header";

@@ -20,7 +20,19 @@ loadEnv({ path: ".env.local" });
 
 import { neon } from "@neondatabase/serverless";
 import { MAINTAINER_USER_ID, DEMO_USER_ID } from "../lib/auth/maintainer";
-import { DEMO_SLUGS_ARRAY } from "../lib/auth/demo-allowlist";
+
+// Inlined from the (now-deleted) lib/auth/demo-allowlist.ts. This
+// runner is one-shot + idempotent; keeping the curated list local
+// here decouples it from the live app's auth module so Phase 7 could
+// remove the legacy file without breaking the historical migration.
+const DEMO_SLUGS_ARRAY: readonly string[] = [
+  "anthropic", "openai", "vercel", "notion", "stripe",
+  "mongodb", "snowflake", "databricks", "datadog", "twilio",
+  "mistral", "cohere", "cursor", "replit", "scaleai",
+  "snorkelai",
+  "mercury", "brex", "ramp", "plaid",
+  "gleanwork", "hebbia",
+];
 
 async function main(): Promise<void> {
   const url = process.env.DATABASE_URL;

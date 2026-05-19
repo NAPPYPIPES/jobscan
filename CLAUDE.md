@@ -187,8 +187,9 @@ back to generic vocabulary, no warning needed.
 - **DB**: Neon Postgres, Drizzle ORM
 - **AI**: Anthropic SDK — Sonnet 4.6 for fit scoring, Haiku 4.5 for
   resume parsing and pro/con summaries
-- **Auth**: single password (`PERSONAL_PASS`) + HMAC-signed session
-  cookie (`AUTH_SECRET`), edge middleware on every non-cron route
+- **Auth**: NextAuth v5 (Google OAuth + email/password Credentials)
+  with the Drizzle adapter, JWT sessions signed by `AUTH_SECRET`, edge
+  middleware on every non-cron route
 
 ## Known boundaries / gotchas
 

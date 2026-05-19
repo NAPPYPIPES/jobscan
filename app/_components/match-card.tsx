@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { Match, DismissReason } from "@/db/schema";
 import type { Level } from "@/lib/scan/types";
-import type { Role } from "@/lib/auth/cookie";
+import type { Role } from "@/lib/auth/viewer";
 import { logoUrl } from "@/lib/scan/logos";
 
 // Apply URL is pre-computed server-side (in page.tsx / all/page.tsx)

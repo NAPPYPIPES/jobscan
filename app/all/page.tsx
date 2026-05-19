@@ -15,7 +15,7 @@ export default async function AllOpen() {
   const viewerRole = await getViewerRole();
   const [matches, targets] = await Promise.all([
     getActiveMatches(userId),
-    getTargets({ role: viewerRole }),
+    getTargets(),
   ]);
 
   const sectorBySlug: Record<string, Sector> = Object.fromEntries(

@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
-import { apiUsage, matches, targets, userMatches } from "@/db/schema";
+import { apiUsage, matches, targets, userMatches, type Match } from "@/db/schema";
 import { jobUrl } from "@/lib/scan/urls";
 import type { Level } from "@/lib/scan/types";
 import { getViewerRole, getViewerUserId } from "@/lib/auth/viewer";
@@ -279,7 +279,7 @@ export default async function Analytics() {
   let noTagCount = 0;
   let topDismissedCompanies: { company: string; count: number }[] = [];
   let topDismissedTitles: { title: string; count: number }[] = [];
-  let recentWithUrls: { m: typeof matches.$inferSelect; url: string }[] = [];
+  let recentWithUrls: { m: Match; url: string }[] = [];
 
   if (!isDemo) {
     const dailySpendRows = await db
@@ -353,10 +353,9 @@ export default async function Analytics() {
 
     const recentDismissed = await db
       .select({
-        // Match the shape compact-row expects (the Match $inferSelect
-        // type — still the legacy matches.$inferSelect since that's
-        // what the component imports). We project user_matches state
-        // into the same field names.
+        // Mirrors db/matches.ts `joinedSelect` — returns the `Match`
+        // merged shape (global fields from matches.* + per-user state
+        // from user_matches.*) that CompactRow expects.
         id: matches.id,
         ats: matches.ats,
         companySlug: matches.companySlug,
@@ -392,7 +391,7 @@ export default async function Analytics() {
       .limit(25);
     recentWithUrls = await Promise.all(
       recentDismissed.map(async (m) => ({
-        m: m as typeof matches.$inferSelect,
+        m,
         url: await jobUrl(m.ats, m.companySlug, m.jobId),
       })),
     );

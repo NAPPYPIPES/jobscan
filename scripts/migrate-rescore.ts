@@ -74,15 +74,30 @@ async function main(): Promise<void> {
   const args = parseArgs();
   const db = getDb();
 
-  // Eligible: open, not dismissed, desc-capable ATS. Sorted: unscored
-  // first (most valuable — they have NO signal), then by level (BV/HIGH
-  // first within scored rows).
+  // Phase 7: per-user state (level, status, fit_score, tier1_*) lives
+  // on user_matches. The script is maintainer-only — join + scope to
+  // MAINTAINER_USER_ID. Joined shape mirrors the legacy single-table
+  // select so the rest of the script reads unchanged.
   const eligible = await db
-    .select()
-    .from(matches)
+    .select({
+      id: matches.id,
+      ats: matches.ats,
+      companySlug: matches.companySlug,
+      companyDisplayName: matches.companyDisplayName,
+      jobId: matches.jobId,
+      title: matches.title,
+      location: matches.location,
+      firstSeen: matches.firstSeen,
+      level: userMatches.level,
+      fitScore: userMatches.fitScore,
+      tier1Score: userMatches.tier1Score,
+    })
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
-        ne(matches.status, "dismissed"),
+        eq(userMatches.userId, MAINTAINER_USER_ID),
+        ne(userMatches.status, "dismissed"),
         isNull(matches.closedAt),
         inArray(matches.ats, ALL_ATSES),
       ),

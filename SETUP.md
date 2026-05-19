@@ -225,8 +225,8 @@ The script has a $5 cost circuit-breaker; pass `--force` to bypass.
 npm run dev
 ```
 
-Visit [http://localhost:3000](http://localhost:3000) and log in with
-`PERSONAL_PASS`. To trigger a scan:
+Visit [http://localhost:3000](http://localhost:3000) and sign in with
+Google (or your seeded maintainer email). To trigger a scan:
 
 ```bash
 # In a second terminal:

@@ -2,8 +2,6 @@ import { notInArray, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import { targets, type Target } from "./schema";
 import type { CompanyStage, Sector } from "@/lib/scan/types";
-import { DEMO_SLUGS } from "@/lib/auth/demo-allowlist";
-import type { Role } from "@/lib/auth/cookie";
 
 // Module-memory cache of the targets list, mirroring db/profile.ts.
 // Targets change rarely (only when the user re-runs
@@ -34,20 +32,16 @@ async function loadFresh() {
   return buildIndex(rows);
 }
 
-// Fetch the watchlist. Returns an array sorted insertion-order by DB
-// (which is undefined for Postgres — callers that need a stable order
-// should sort by displayName themselves). The full row shape matches
-// db/schema.ts's `Target`.
+// Fetch the GLOBAL watchlist catalog — every target any user is
+// tracking. Per-user views (recent / all / docs) join through
+// `user_targets` against this catalog; this function returns the
+// unfiltered set. Callers wanting the viewer's own subset should
+// query user_targets → targets directly (see app/docs/page.tsx).
 //
-// `opts.role`: pass 'demo' to filter to the curated demo allowlist;
-// omit (or pass 'owner') to get the full set. Filtering is post-cache
-// since the underlying rows don't differ by role — same DB state, two
-// views.
-export async function getTargets(opts: { role?: Role } = {}): Promise<Target[]> {
+// Returns an array sorted insertion-order by DB (Postgres-undefined —
+// callers that need stable order should sort by displayName).
+export async function getTargets(): Promise<Target[]> {
   if (!cached) cached = await loadFresh();
-  if (opts.role === "demo") {
-    return cached.rows.filter((r) => DEMO_SLUGS.has(r.slug));
-  }
   return cached.rows;
 }
 

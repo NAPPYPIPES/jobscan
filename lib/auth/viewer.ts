@@ -1,6 +1,5 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import type { Role } from "./cookie";
 import { isDemoUser } from "./maintainer";
 
 // Server-side helpers for reading the viewer's identity. The user id
@@ -17,7 +16,7 @@ import { isDemoUser } from "./maintainer";
 
 const HEADER_USER_ID = "x-par-user-id";
 
-export type { Role };
+export type Role = "owner" | "demo";
 
 export async function getViewerUserId(): Promise<string | null> {
   const h = await headers();

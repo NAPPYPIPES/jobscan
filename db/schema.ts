@@ -114,6 +114,11 @@ export type DismissReason =
   | "wrong_location"
   | "not_interested";
 
+// Global catalog of every job posting any user is tracking. Per-user
+// state (level, status, fit_score, tier1_*, etc.) lives on
+// `user_matches`; matches.* holds only the global facts about a posting
+// (title, ATS, location, first/last/closed timestamps). Phase 7
+// removed the legacy per-user columns from this table.
 export const matches = pgTable(
   "matches",
   {
@@ -122,29 +127,16 @@ export const matches = pgTable(
     companySlug: text("company_slug").notNull(),
     companyDisplayName: text("company_display_name").notNull(),
     jobId: text("job_id").notNull(),
-    level: text("level").$type<Level>().notNull(),
     title: text("title").notNull(),
     location: text("location").notNull(),
     firstSeen: timestamp("first_seen", { withTimezone: true }).notNull().defaultNow(),
     lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
     // True when the row was inserted as part of a slug's first-ever scan
     // (i.e., a newly-added TARGET) rather than a genuine net-new posting
-    // at an existing target. Excludes these rows from "new in last X"
-    // counts and the email digest so adding companies doesn't pollute
-    // net-new signals.
+    // at an existing target. Per-user user_matches.is_baseline propagates
+    // from this flag at fan-out time; kept here too so brand-new users
+    // can be baselined against the full current catalog on signup.
     isBaseline: boolean("is_baseline").notNull().default(false),
-    status: text("status").$type<MatchStatus>().notNull().default("new"),
-    // Set when status flips to 'applied', cleared when flipped back to
-    // 'new'. Distinct from updatedAt (which any re-scan bumps) so any
-    // UI showing "when you actually applied" reads the right thing.
-    appliedAt: timestamp("applied_at", { withTimezone: true }),
-    // Set when the user dismisses a card. Distinct from status='dismissed'
-    // (which still drives main-view visibility) so we can capture the
-    // reason picker data without changing existing read paths.
-    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
-    // Array of DismissReason values. Null when the user dismissed without
-    // tagging anything.
-    dismissReason: text("dismiss_reason").array().$type<DismissReason[]>(),
     // Set by the scanner when a previously-seen row stops being returned
     // by its ATS — i.e., the listing closed. Cleared back to null on
     // upsert if the same (ats, slug, job_id) reappears in a later scan
@@ -154,28 +146,6 @@ export const matches = pgTable(
     // for that company. Read paths default to closed_at IS NULL so
     // /all and the digest exclude closed rows automatically.
     closedAt: timestamp("closed_at", { withTimezone: true }),
-    // Claude-API-driven fit score for BV/HIGH/MEDIUM new roles. Populated
-    // only when (a) role is BV/HIGH/MEDIUM at first-insert, (b) ATS provides
-    // a description (Greenhouse/Ashby/Lever — Workday/SR are skipped),
-    // (c) the monthly API spend cap hasn't been hit.
-    fitScore: numeric("fit_score", { precision: 3, scale: 1 }),
-    fitSummary: text("fit_summary"),
-    fitFlag: text("fit_flag"),
-    // Tier-1 (Haiku triage) fields. Populated on every new desc-capable
-    // role before Tier-2 escalation is decided. Persist independently
-    // from fit_score so a role can have Tier-1 results without Tier-2.
-    tier1Score: numeric("tier1_score", { precision: 3, scale: 1 }),
-    tier1Confidence: text("tier1_confidence"),
-    tier1IsPotentialBv: boolean("tier1_is_potential_bv"),
-    tier1QuickTake: text("tier1_quick_take"),
-    // Set true when Tier-1 flagged is_potential_bv=true but Sonnet cap
-    // was hit, so Tier-2 verification was deferred. Row persists as HIGH
-    // until the next cron tick picks it up for retroactive Tier-2.
-    pendingBvVerification: boolean("pending_bv_verification").notNull().default(false),
-    // Sonnet's one-sentence justification for level_recommendation = BV.
-    // Required when Sonnet assigns BV; null otherwise. Lets you audit
-    // every BV assignment for the title-pattern + seniority signal.
-    bvReasoning: text("bv_reasoning"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -185,7 +155,21 @@ export const matches = pgTable(
   ],
 );
 
-export type Match = typeof matches.$inferSelect;
+// `Match` is the shape every UI consumer expects: global match fields
+// (title, ats, first_seen, closed_at, ...) merged with the viewer's
+// per-user state from user_matches (level, status, fit_score, tier1_*,
+// is_baseline, ...). Every read path in db/matches.ts JOINs the two
+// tables and returns this shape; defining the type as the union of
+// both inferSelects keeps it locked to the schema instead of a
+// hand-maintained duplicate.
+//
+// Conflict-resolving Omits: isBaseline + updatedAt exist on both
+// tables, and the JOIN reads the user_matches value (per-user flags
+// override global). The Omits on matches.* drop those collisions so
+// the merged type takes them from user_matches.
+type GlobalMatchFields = Omit<typeof matches.$inferSelect, "isBaseline" | "updatedAt">;
+type PerUserMatchFields = Omit<typeof userMatches.$inferSelect, "userId" | "matchId" | "createdAt">;
+export type Match = GlobalMatchFields & PerUserMatchFields;
 export type NewMatch = typeof matches.$inferInsert;
 
 // Cost ledger for the Claude fit-scoring feature. One row per Claude API

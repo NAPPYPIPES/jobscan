@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ManualCompany, ManualSector } from "@/db/manual-companies";
-import type { Role } from "@/lib/auth/cookie";
+import type { Role } from "@/lib/auth/viewer";
 import {
   BORDER_CLASSES,
   getStaleness,

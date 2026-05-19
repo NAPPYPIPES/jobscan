@@ -14,7 +14,7 @@ loadEnv({ path: ".env.local" });
 
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
-import { matches } from "../db/schema";
+import { matches, userMatches } from "../db/schema";
 import {
   extractScoringText,
   fetchDescription,
@@ -28,13 +28,33 @@ import type { Tier1Result } from "../lib/fit/escalation";
 async function main(): Promise<void> {
   const db = getDb();
 
+  // Phase 7: per-user state (level, status, fit_score, tier1_*) lives on
+  // user_matches. Join to matches for the global fields (title, ats,
+  // closed_at). Scoped to the maintainer since this script is the
+  // maintainer's own re-score tool.
   const bvRows = await db
-    .select()
-    .from(matches)
+    .select({
+      id: matches.id,
+      ats: matches.ats,
+      companySlug: matches.companySlug,
+      companyDisplayName: matches.companyDisplayName,
+      jobId: matches.jobId,
+      title: matches.title,
+      location: matches.location,
+      level: userMatches.level,
+      fitScore: userMatches.fitScore,
+      tier1Score: userMatches.tier1Score,
+      tier1Confidence: userMatches.tier1Confidence,
+      tier1QuickTake: userMatches.tier1QuickTake,
+      tier1IsPotentialBv: userMatches.tier1IsPotentialBv,
+    })
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
     .where(
       and(
-        eq(matches.level, "BV"),
-        ne(matches.status, "dismissed"),
+        eq(userMatches.userId, MAINTAINER_USER_ID),
+        eq(userMatches.level, "BV"),
+        ne(userMatches.status, "dismissed"),
         isNull(matches.closedAt),
       ),
     );
@@ -109,12 +129,18 @@ async function main(): Promise<void> {
 
   console.log(`\nTotal spend: $${totalCost.toFixed(4)}`);
 
-  // Final state.
+  // Final state. Per-user fields moved to user_matches in phase 5; the
+  // global matches row holds title + company_slug. closed_at stays on
+  // matches.
   const after = await db.execute(sql`
-    select company_slug, title, fit_score, level, bv_reasoning
-    from matches
-    where level = 'BV' and status <> 'dismissed' and closed_at is null
-    order by fit_score desc
+    select m.company_slug, m.title, um.fit_score, um.level, um.bv_reasoning
+    from user_matches um
+    join matches m on m.id = um.match_id
+    where um.user_id = ${MAINTAINER_USER_ID}
+      and um.level = 'BV'
+      and um.status <> 'dismissed'
+      and m.closed_at is null
+    order by um.fit_score desc
   `);
   console.log(`\n=== Post-rescore BV roles (${after.rows.length}) ===`);
   for (const r of after.rows) {

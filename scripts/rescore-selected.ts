@@ -12,9 +12,9 @@
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local" });
 
-import { and, desc, eq, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { getDb } from "../db/client";
-import { matches } from "../db/schema";
+import { matches, userMatches } from "../db/schema";
 import {
   extractScoringText,
   fetchDescription,
@@ -38,21 +38,45 @@ async function main(): Promise<void> {
   const topHigh = parseInt(process.argv[2] ?? "10", 10);
   const db = getDb();
 
+  // Phase 7: per-user state (level, status, fit_score, fit_flag) is on
+  // user_matches; matches holds the global title + closed_at. Joined
+  // selects mirror the legacy shape so the rest of the script reads
+  // unchanged. Maintainer-only script — scope to MAINTAINER_USER_ID.
+  const joined = {
+    id: matches.id,
+    ats: matches.ats,
+    companySlug: matches.companySlug,
+    companyDisplayName: matches.companyDisplayName,
+    jobId: matches.jobId,
+    title: matches.title,
+    location: matches.location,
+    level: userMatches.level,
+    fitScore: userMatches.fitScore,
+    fitFlag: userMatches.fitFlag,
+    tier1Score: userMatches.tier1Score,
+    tier1Confidence: userMatches.tier1Confidence,
+    tier1QuickTake: userMatches.tier1QuickTake,
+    tier1IsPotentialBv: userMatches.tier1IsPotentialBv,
+  } as const;
+
   const open = and(
-    ne(matches.status, "dismissed"),
+    eq(userMatches.userId, MAINTAINER_USER_ID),
+    ne(userMatches.status, "dismissed"),
     isNull(matches.closedAt),
   );
 
   const bv = await db
-    .select()
-    .from(matches)
-    .where(and(open, eq(matches.level, "BV")));
+    .select(joined)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
+    .where(and(open, eq(userMatches.level, "BV")));
 
   const high = await db
-    .select()
-    .from(matches)
-    .where(and(open, eq(matches.level, "HIGH"), isNotNull(matches.fitScore)))
-    .orderBy(desc(matches.fitScore))
+    .select(joined)
+    .from(userMatches)
+    .innerJoin(matches, eq(matches.id, userMatches.matchId))
+    .where(and(open, eq(userMatches.level, "HIGH"), isNotNull(userMatches.fitScore)))
+    .orderBy(desc(userMatches.fitScore))
     .limit(topHigh);
 
   // Snapshot pre-rescore.
@@ -127,12 +151,25 @@ async function main(): Promise<void> {
   }
   process.stdout.write("\n");
 
-  // Re-fetch and print before/after.
+  // Re-fetch and print before/after. user_matches holds the per-user
+  // state we care about (fit_score, level, fit_flag); join matches in
+  // only for the row id.
   const ids = Array.from(snapshots.keys());
   const after = await db
-    .select()
-    .from(matches);
-  const afterMap = new Map(after.filter((m) => ids.includes(m.id)).map((m) => [m.id, m]));
+    .select({
+      id: userMatches.matchId,
+      fitScore: userMatches.fitScore,
+      level: userMatches.level,
+      fitFlag: userMatches.fitFlag,
+    })
+    .from(userMatches)
+    .where(
+      and(
+        eq(userMatches.userId, MAINTAINER_USER_ID),
+        inArray(userMatches.matchId, ids),
+      ),
+    );
+  const afterMap = new Map(after.map((m) => [m.id, m]));
 
   console.log(`\n=== BEFORE / AFTER ===`);
   console.log(`Spend on this rescore: $${totalCost.toFixed(4)}\n`);
