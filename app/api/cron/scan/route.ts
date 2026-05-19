@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { runScanAndPersist } from "@/lib/scan/run";
 
 // 20+ parallel ATS fetches + one bulk DB upsert complete in well under
@@ -19,13 +20,29 @@ export async function GET(req: Request) {
     }
   }
 
+  // runId tags every log line and the response body so a failure can be
+  // tied back to a specific cron invocation in Vercel's log explorer.
+  // Free-tier Vercel only retains ~30 min of runtime logs, so without a
+  // forensic trail in the catch block, intermittent 500s are unrecoverable.
+  const runId = randomUUID().slice(0, 8);
+  const startedAt = Date.now();
+  console.log(`[scan ${runId}] start`);
+
   try {
     const summary = await runScanAndPersist();
-    return NextResponse.json(summary);
+    const elapsedMs = Date.now() - startedAt;
+    console.log(`[scan ${runId}] ok in ${elapsedMs}ms`);
+    return NextResponse.json({ runId, elapsedMs, ...summary });
   } catch (err) {
-    console.error("Scan failed:", err);
+    const elapsedMs = Date.now() - startedAt;
+    const name = err instanceof Error ? err.name : "UnknownError";
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    console.error(
+      `[scan ${runId}] FAIL after ${elapsedMs}ms — ${name}: ${message}\n${stack ?? "(no stack)"}`,
+    );
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Unknown error" },
+      { runId, elapsedMs, error: { name, message, stack } },
       { status: 500 },
     );
   }
