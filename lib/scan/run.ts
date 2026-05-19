@@ -248,13 +248,16 @@ export async function runScanAndPersist(): Promise<RunSummary> {
   // intentional bulk import, not net-new discovery.
   await applyPerDayCaps(results, baselineSlugs);
 
-  await persistScanResults(results, baselineSlugs);
+  const levelByMatchId = await persistScanResults(results, baselineSlugs);
 
   // Phase 4: after global matches are persisted, fan out any newly-
   // inserted rows into per-user user_matches for every subscriber via
   // user_targets. Idempotent — only inserts (user_id, match_id) pairs
   // that don't already exist, so running this every scan is fine.
-  const fanout = await fanOutToUserMatches();
+  // levelByMatchId carries the classifier output through to the
+  // fan-out SQL — matches.level no longer exists (Phase 7) so the SQL
+  // can't source it from m.*.
+  const fanout = await fanOutToUserMatches({}, levelByMatchId);
   if (fanout.inserted > 0) {
     console.log(`[scan] fanned out ${fanout.inserted} new user_matches rows`);
   }

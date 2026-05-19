@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import { matches, targets, userMatches } from "./schema";
-import { LEVEL_ORDER, type CompanyResult } from "@/lib/scan/types";
+import { LEVEL_ORDER, type CompanyResult, type Level } from "@/lib/scan/types";
 import type { Match, MatchStatus, DismissReason } from "./schema";
 
 // Phase 4: every read returns per-user state by JOINing matches (the
@@ -190,9 +190,16 @@ export async function loadPriorIdsBySlug(): Promise<Map<string, Set<string>>> {
 }
 
 // Upsert every match from a scan run AND actively close any prior row
-// for a successful slug whose jobId wasn't returned this run. UNCHANGED
-// from Phase 3 — writes are still to the global matches table. Per-user
-// fan-out happens AFTER this function returns; see lib/scan/run.ts.
+// for a successful slug whose jobId wasn't returned this run. Writes
+// only the global matches columns (Phase 7 dropped per-user fields).
+// Per-user fan-out happens AFTER this function returns; see
+// lib/scan/run.ts.
+//
+// Returns a Map<matchId, Level> covering every row touched by the
+// upsert (insert or update). The fan-out helper needs this to populate
+// user_matches.level — since Phase 7 dropped matches.level, the
+// classifier output that lives only in memory (CompanyResult.matches[].level)
+// has to be threaded through to where user_matches rows are created.
 //
 // Only successful slugs trigger closure — failed-fetch slugs are
 // skipped entirely so a transient ATS outage doesn't auto-close every
@@ -204,7 +211,7 @@ export async function loadPriorIdsBySlug(): Promise<Map<string, Set<string>>> {
 export async function persistScanResults(
   results: CompanyResult[],
   baselineSlugs: Set<string>,
-): Promise<void> {
+): Promise<Map<string, Level>> {
   const db = getDb();
   const successfulSlugs = results.map((r) => r.slug);
 
@@ -214,15 +221,20 @@ export async function persistScanResults(
       companySlug: r.slug,
       companyDisplayName: r.displayName,
       jobId: m.id,
-      level: m.level,
       title: m.title,
       location: m.location,
       isBaseline: baselineSlugs.has(r.slug),
     })),
   );
 
+  // Phase 7 dropped matches.level — level lives only on user_matches
+  // now. RETURNING the match UUID for every upserted row lets us hand
+  // the (matchId → level) map to fanOutToUserMatches, which needs it
+  // because the fan-out INSERT can no longer source level from
+  // matches.*.
+  const levelByMatchId = new Map<string, Level>();
   if (rows.length > 0) {
-    await db
+    const inserted = await db
       .insert(matches)
       .values(rows)
       .onConflictDoUpdate({
@@ -235,7 +247,24 @@ export async function persistScanResults(
           companyDisplayName: sql`excluded.company_display_name`,
           closedAt: sql`NULL`,
         },
+      })
+      .returning({
+        id: matches.id,
+        ats: matches.ats,
+        companySlug: matches.companySlug,
+        jobId: matches.jobId,
       });
+
+    const lookup = new Map<string, Level>();
+    for (const r of results) {
+      for (const m of r.matches) {
+        lookup.set(`${r.ats}|${r.slug}|${m.id}`, m.level);
+      }
+    }
+    for (const row of inserted) {
+      const lvl = lookup.get(`${row.ats}|${row.companySlug}|${row.jobId}`);
+      if (lvl) levelByMatchId.set(row.id, lvl);
+    }
   }
 
   // Per-slug closure pass. Closures are GLOBAL — when a job leaves
@@ -263,4 +292,6 @@ export async function persistScanResults(
       .set({ lastSuccessAt: sql`now()` })
       .where(inArray(targets.slug, successfulSlugs));
   }
+
+  return levelByMatchId;
 }
