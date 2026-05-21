@@ -177,33 +177,36 @@ export function DailyNewJobsChart({ data }: { data: DailyNewJobsRow[] }) {
         <div className="relative flex h-[9.2rem] items-end gap-[1px] border-b border-l border-line pl-2 pr-1 pt-1">
           {padded.map((d) => {
             const vTotal = visibleTotal(d);
+            // Bar slot is itself flex-col-reverse + h-full so each
+            // segment's `height: X%` resolves against the chart area's
+            // pixel height (yMax). Earlier revision wrapped segments in
+            // a height-less inner div, which collapsed percentage
+            // heights to 0 and made only the avg line visible.
             return (
               <div
                 key={d.date}
-                className="group relative flex h-full flex-1 items-end"
+                className="group relative flex h-full flex-1 flex-col-reverse"
                 title={tooltipFor(d, granularity, vTotal)}
               >
                 {vTotal === 0 ? (
                   <div
-                    className="w-full rounded-sm bg-muted transition-colors group-hover:bg-line"
+                    className="w-full bg-muted transition-colors group-hover:bg-line"
                     style={{ height: "1%" }}
                   />
                 ) : (
-                  <div className="flex w-full flex-col-reverse overflow-hidden rounded-sm">
-                    {STACK_ORDER.map((level) => {
-                      if (!enabled[level]) return null;
-                      const c = d.counts[level];
-                      if (c === 0) return null;
-                      const heightPct = yMax === 0 ? 0 : (c / yMax) * 100;
-                      return (
-                        <div
-                          key={level}
-                          className={`w-full transition-opacity ${LEVEL_BAR_COLOR[level]} group-hover:opacity-80`}
-                          style={{ height: `${heightPct}%` }}
-                        />
-                      );
-                    })}
-                  </div>
+                  STACK_ORDER.map((level) => {
+                    if (!enabled[level]) return null;
+                    const c = d.counts[level];
+                    if (c === 0) return null;
+                    const heightPct = yMax === 0 ? 0 : (c / yMax) * 100;
+                    return (
+                      <div
+                        key={level}
+                        className={`w-full transition-opacity ${LEVEL_BAR_COLOR[level]} group-hover:opacity-80`}
+                        style={{ height: `${heightPct}%` }}
+                      />
+                    );
+                  })
                 )}
               </div>
             );
