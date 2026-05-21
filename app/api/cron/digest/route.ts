@@ -60,6 +60,8 @@ export async function GET(req: Request) {
       today: number;
       yesterday: number;
       sent: boolean;
+      reason?: string;
+      detail?: string;
     }> = [];
 
     for (const { userId } of eligible) {
@@ -86,14 +88,15 @@ export async function GET(req: Request) {
       const today = alertable.filter((r) => r.firstSeen >= cutoff24);
       const yesterday = alertable.filter((r) => r.firstSeen < cutoff24);
 
-      const ok = await sendDigest(userId, { today, yesterday });
-      if (ok) sent++;
+      const result = await sendDigest(userId, { today, yesterday });
+      if (result.ok) sent++;
       else skipped++;
       perUser.push({
         userId,
         today: today.length,
         yesterday: yesterday.length,
-        sent: ok,
+        sent: result.ok,
+        ...(result.ok ? {} : { reason: result.reason, detail: result.detail }),
       });
     }
 

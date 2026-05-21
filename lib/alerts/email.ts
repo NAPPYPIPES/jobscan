@@ -473,33 +473,45 @@ export async function resolveRecipient(
   return { to, capNotice };
 }
 
+// Discriminated result so the cron route can surface WHY a send was
+// skipped — previously the route had only a boolean and couldn't tell
+// "user opted out" from "Resend rejected the domain" from "env var
+// missing." With prod logs limited (Vercel Hobby retains ~30 min of
+// runtime logs), the reason has to ride back in the HTTP response or
+// it's effectively unobservable.
+export type SendDigestResult =
+  | { ok: true; id: string; to: string }
+  | {
+      ok: false;
+      reason:
+        | "missing_resend_key"
+        | "missing_from_email"
+        | "no_recipient"
+        | "resend_error";
+      detail?: string;
+    };
+
 // Send a daily digest to one user. The cron route loops every
 // onboarded user with digest_enabled=true and calls this once each;
 // recipient + cap notice come from resolveRecipient(userId).
-//
-// Returns false on missing API key, missing recipient (user opted
-// out or no email on file), or Resend error.
 export async function sendDigest(
   userId: string,
   data: DigestData,
-): Promise<boolean> {
+): Promise<SendDigestResult> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn("[alerts] RESEND_API_KEY not set — skipping email send");
-    return false;
+    return { ok: false, reason: "missing_resend_key" };
   }
   const from = process.env.ALERT_FROM_EMAIL;
   if (!from) {
     console.warn("[alerts] ALERT_FROM_EMAIL not set — skipping email send");
-    return false;
+    return { ok: false, reason: "missing_from_email" };
   }
 
   const recipient = await resolveRecipient(userId);
   if (!recipient) {
-    // Either the user has digest_enabled=false, or they have no
-    // resolvable email. Either way: skip silently. The cron loop
-    // counts this as "skipped, not failed."
-    return false;
+    return { ok: false, reason: "no_recipient" };
   }
 
   const siteUrl = process.env.SITE_URL ?? "(set SITE_URL in env)";
@@ -519,14 +531,23 @@ export async function sendDigest(
     text: buildText(data, now, siteUrl, recipient.capNotice),
   });
   if (error) {
+    // Resend's error object has {statusCode, name, message}. Keep the
+    // full thing in console for debugging, surface the message + name
+    // through the API response so it shows up in the cron caller's logs.
     console.error(
       `[alerts] Resend send failed (user ${userId.slice(0, 8)}):`,
       error,
     );
-    return false;
+    const detail =
+      typeof error === "object" && error !== null
+        ? `${(error as { name?: string }).name ?? "ResendError"}: ${
+            (error as { message?: string }).message ?? JSON.stringify(error)
+          }`
+        : String(error);
+    return { ok: false, reason: "resend_error", detail };
   }
   console.log(
     `[alerts] digest sent to ${recipient.to} (user ${userId.slice(0, 8)}, today=${data.today.length}, yesterday=${data.yesterday.length}, total=${total}, id=${result?.id})`,
   );
-  return true;
+  return { ok: true, id: result?.id ?? "", to: recipient.to };
 }
