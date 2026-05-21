@@ -147,6 +147,16 @@ async function scanOne(
         return await scanWorkdayCompany(target, priorIds, isBaseline, vocab);
       case "workable":
         return await scanWorkableCompany(target, priorIds, isBaseline, vocab);
+      default: {
+        // Exhaustiveness check: adding a value to the Ats union without
+        // adding a case here is a compile error. Prior bug: targets
+        // ingested ahead of an adapter deploy slipped through as
+        // undefined and crashed downstream where `r.displayName` was
+        // read — caller's filter only excluded null, not undefined.
+        const _exhaustive: never = target.ats;
+        console.error(`[${target.slug}] unknown ats: ${_exhaustive}`);
+        return null;
+      }
     }
   } catch (err) {
     console.error(`[${target.slug}] fetch failed:`, err instanceof Error ? err.message : err);
@@ -214,7 +224,11 @@ export async function runScanAndPersist(): Promise<RunSummary> {
   const settled = await Promise.all(
     TARGETS.map((t) => scanOne(t, priorBySlug.get(t.slug), isBaseline, vocab)),
   );
-  const results = settled.filter((r): r is CompanyResult => r !== null);
+  // `!= null` matches both null AND undefined. The narrower `!== null`
+  // previously here let a falls-through-the-switch undefined slip into
+  // results and crash on `result.displayName`. Belt-and-suspenders with
+  // the exhaustiveness check in scanOne's default branch.
+  const results = settled.filter((r): r is CompanyResult => r != null);
 
   const totals: Record<Level, number> = { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
   let totalRoles = 0;
