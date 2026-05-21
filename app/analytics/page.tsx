@@ -276,24 +276,39 @@ export default async function Analytics() {
 
   // ─── New jobs per day (scoped to the viewer's watchlist) ──────────
   // Pull matches.first_seen counts per UTC day for the last 90 days,
-  // joined through user_matches → the user's targets. Excludes baseline
-  // imports (those are intentional bulk adds, not net-new discoveries).
-  // Returned to the client zero-padded; the chart pads missing days.
+  // grouped by level so the chart can stack BV/HIGH/MEDIUM/LOW. Joined
+  // through user_matches → the user's targets. Excludes baseline imports
+  // (those are intentional bulk adds, not net-new discoveries). The
+  // chart pads missing days/levels client-side.
   const dailyNewJobsRows = await db.execute(sql`
     SELECT
       to_char(date_trunc('day', m.first_seen at time zone 'UTC'), 'YYYY-MM-DD') AS date,
+      um.level AS level,
       count(*)::int AS count
     FROM user_matches um
     JOIN matches m ON m.id = um.match_id
     WHERE um.user_id = ${userId}
       AND um.is_baseline = false
       AND m.first_seen >= now() - interval '90 days'
-    GROUP BY date_trunc('day', m.first_seen at time zone 'UTC')
+    GROUP BY date_trunc('day', m.first_seen at time zone 'UTC'), um.level
     ORDER BY date_trunc('day', m.first_seen at time zone 'UTC')
   `);
-  const dailyNewJobs: DailyNewJobsRow[] = (
-    dailyNewJobsRows.rows as { date: string; count: number }[]
-  ).map((r) => ({ date: r.date, count: r.count }));
+  const dailyJobsMap = new Map<string, Record<Level, number>>();
+  for (const r of dailyNewJobsRows.rows as {
+    date: string;
+    level: string;
+    count: number;
+  }[]) {
+    let entry = dailyJobsMap.get(r.date);
+    if (!entry) {
+      entry = { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+      dailyJobsMap.set(r.date, entry);
+    }
+    entry[r.level as Level] = r.count;
+  }
+  const dailyNewJobs: DailyNewJobsRow[] = Array.from(dailyJobsMap.entries()).map(
+    ([date, counts]) => ({ date, counts }),
+  );
 
   // ─── Personal-data sections (skipped entirely in demo mode) ───────
   // Dismissal patterns + API spend reveal the viewer's actual

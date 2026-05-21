@@ -1,18 +1,22 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { Level } from "@/lib/scan/types";
 
 // Daily / weekly new-jobs bar chart, parallel in structure to
-// app/docs/daily-spend-chart.tsx. Receives raw daily rows (only days
-// with arrivals are present); the client pads zero gaps, optionally
-// aggregates to weekly buckets, and renders pure-CSS bars plus an
-// average line.
+// app/docs/daily-spend-chart.tsx. Each bar is stacked by level
+// (BV / HIGH / MEDIUM / LOW), color-matched to TopCompaniesList +
+// JobsByLevel. Level checkboxes toggle which segments contribute to
+// the visible total + the y-axis scale.
 //
 // "New jobs" = matches.first_seen rows where is_baseline = false
 // (intentional bulk imports excluded). See the server query in
 // app/analytics/page.tsx.
 
-export type DailyNewJobsRow = { date: string; count: number };
+export type DailyNewJobsRow = {
+  date: string;
+  counts: Record<Level, number>;
+};
 
 type Granularity = "day" | "week";
 
@@ -32,9 +36,36 @@ const RANGES: Record<Granularity, readonly { units: number; label: string }[]> =
 
 const DEFAULT_RANGE: Record<Granularity, number> = { day: 14, week: 8 };
 
+// Stack source order = visual bottom-to-top via flex-col-reverse:
+// BV at bottom, LOW at top. Matches TopCompaniesList's left-to-right
+// order so the color story is consistent across the page.
+const STACK_ORDER: Level[] = ["BV", "HIGH", "MEDIUM", "LOW"];
+
+const LEVEL_BAR_COLOR: Record<Level, string> = {
+  BV: "bg-indigo-600 dark:bg-indigo-500",
+  HIGH: "bg-rose-600 dark:bg-rose-500",
+  MEDIUM: "bg-amber-500 dark:bg-amber-400",
+  LOW: "bg-stone-400 dark:bg-stone-500",
+};
+
+const LEVEL_LABEL: Record<Level, string> = {
+  BV: "BV",
+  HIGH: "HIGH",
+  MEDIUM: "MED",
+  LOW: "LOW",
+};
+
+const EMPTY_COUNTS: Record<Level, number> = { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+
 export function DailyNewJobsChart({ data }: { data: DailyNewJobsRow[] }) {
   const [granularity, setGranularity] = useState<Granularity>("day");
   const [units, setUnits] = useState<number>(DEFAULT_RANGE.day);
+  const [enabled, setEnabled] = useState<Record<Level, boolean>>({
+    BV: true,
+    HIGH: true,
+    MEDIUM: true,
+    LOW: true,
+  });
 
   const padded = useMemo(
     () =>
@@ -44,11 +75,18 @@ export function DailyNewJobsChart({ data }: { data: DailyNewJobsRow[] }) {
     [data, granularity, units],
   );
 
-  const total = padded.reduce((sum, d) => sum + d.count, 0);
+  const visibleTotal = (row: DailyNewJobsRow): number =>
+    STACK_ORDER.reduce(
+      (sum, l) => sum + (enabled[l] ? row.counts[l] : 0),
+      0,
+    );
+
+  const total = padded.reduce((sum, d) => sum + visibleTotal(d), 0);
   const avg = padded.length > 0 ? total / padded.length : 0;
-  const maxCount = Math.max(...padded.map((d) => d.count), 0);
+  const maxCount = Math.max(...padded.map(visibleTotal), 0);
   const yMax = niceUpper(maxCount);
-  const avgFromTopPct = yMax > 0 ? Math.min(99, Math.max(1, 100 - (avg / yMax) * 100)) : 100;
+  const avgFromTopPct =
+    yMax > 0 ? Math.min(99, Math.max(1, 100 - (avg / yMax) * 100)) : 100;
 
   const labelEvery = Math.max(1, Math.ceil(padded.length / 7));
   const unitLabel = granularity === "day" ? "days" : "weeks";
@@ -110,24 +148,63 @@ export function DailyNewJobsChart({ data }: { data: DailyNewJobsRow[] }) {
         </div>
       </div>
 
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
+          Show
+        </span>
+        {STACK_ORDER.map((l) => (
+          <label
+            key={l}
+            className="flex cursor-pointer items-center gap-1.5 text-[11px] text-fg-muted hover:text-fg"
+          >
+            <input
+              type="checkbox"
+              checked={enabled[l]}
+              onChange={(e) =>
+                setEnabled((prev) => ({ ...prev, [l]: e.target.checked }))
+              }
+              className="h-3 w-3 cursor-pointer accent-fg"
+            />
+            <span
+              className={`inline-block h-2 w-2 rounded-sm ${LEVEL_BAR_COLOR[l]}`}
+            />
+            <span className="font-mono tabular-nums">{LEVEL_LABEL[l]}</span>
+          </label>
+        ))}
+      </div>
+
       <div className="relative">
-        <div className="relative flex h-32 items-end gap-[1px] border-b border-l border-line pl-2 pr-1 pt-1">
+        <div className="relative flex h-[9.2rem] items-end gap-[1px] border-b border-l border-line pl-2 pr-1 pt-1">
           {padded.map((d) => {
-            const heightPct = yMax === 0 ? 0 : (d.count / yMax) * 100;
+            const vTotal = visibleTotal(d);
             return (
               <div
                 key={d.date}
                 className="group relative flex h-full flex-1 items-end"
-                title={`${labelForBar(d.date, granularity)} — ${d.count} job${d.count === 1 ? "" : "s"}`}
+                title={tooltipFor(d, granularity, vTotal)}
               >
-                <div
-                  className={`w-full rounded-sm transition-colors ${
-                    d.count > 0
-                      ? "bg-indigo-500 group-hover:bg-indigo-600 dark:bg-indigo-400 dark:group-hover:bg-indigo-300"
-                      : "bg-muted group-hover:bg-line"
-                  }`}
-                  style={{ height: `${Math.max(heightPct, d.count > 0 ? 2 : 1)}%` }}
-                />
+                {vTotal === 0 ? (
+                  <div
+                    className="w-full rounded-sm bg-muted transition-colors group-hover:bg-line"
+                    style={{ height: "1%" }}
+                  />
+                ) : (
+                  <div className="flex w-full flex-col-reverse overflow-hidden rounded-sm">
+                    {STACK_ORDER.map((level) => {
+                      if (!enabled[level]) return null;
+                      const c = d.counts[level];
+                      if (c === 0) return null;
+                      const heightPct = yMax === 0 ? 0 : (c / yMax) * 100;
+                      return (
+                        <div
+                          key={level}
+                          className={`w-full transition-opacity ${LEVEL_BAR_COLOR[level]} group-hover:opacity-80`}
+                          style={{ height: `${heightPct}%` }}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -158,7 +235,7 @@ export function DailyNewJobsChart({ data }: { data: DailyNewJobsRow[] }) {
 }
 
 function buildDailyRange(data: DailyNewJobsRow[], days: number): DailyNewJobsRow[] {
-  const map = new Map(data.map((d) => [d.date, d.count]));
+  const map = new Map(data.map((d) => [d.date, d.counts]));
   const out: DailyNewJobsRow[] = [];
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -166,13 +243,13 @@ function buildDailyRange(data: DailyNewJobsRow[], days: number): DailyNewJobsRow
     const d = new Date(today);
     d.setUTCDate(d.getUTCDate() - i);
     const iso = d.toISOString().slice(0, 10);
-    out.push({ date: iso, count: map.get(iso) ?? 0 });
+    out.push({ date: iso, counts: map.get(iso) ?? { ...EMPTY_COUNTS } });
   }
   return out;
 }
 
 function buildWeeklyRange(data: DailyNewJobsRow[], weeks: number): DailyNewJobsRow[] {
-  const dailyMap = new Map(data.map((d) => [d.date, d.count]));
+  const dailyMap = new Map(data.map((d) => [d.date, d.counts]));
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const dow = today.getUTCDay();
@@ -184,14 +261,20 @@ function buildWeeklyRange(data: DailyNewJobsRow[], weeks: number): DailyNewJobsR
   for (let w = weeks - 1; w >= 0; w--) {
     const weekStart = new Date(currentWeekStart);
     weekStart.setUTCDate(weekStart.getUTCDate() - w * 7);
-    let sum = 0;
+    const sum: Record<Level, number> = { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
     for (let d = 0; d < 7; d++) {
       const day = new Date(weekStart);
       day.setUTCDate(day.getUTCDate() + d);
       const iso = day.toISOString().slice(0, 10);
-      sum += dailyMap.get(iso) ?? 0;
+      const c = dailyMap.get(iso);
+      if (c) {
+        sum.BV += c.BV;
+        sum.HIGH += c.HIGH;
+        sum.MEDIUM += c.MEDIUM;
+        sum.LOW += c.LOW;
+      }
     }
-    out.push({ date: weekStart.toISOString().slice(0, 10), count: sum });
+    out.push({ date: weekStart.toISOString().slice(0, 10), counts: sum });
   }
   return out;
 }
@@ -204,6 +287,16 @@ function niceUpper(max: number): number {
   const buckets = [5, 10, 25, 50, 100, 200, 400, 800, 1500, 3000];
   for (const b of buckets) if (max <= b) return b;
   return Math.ceil(max / 1000) * 1000;
+}
+
+function tooltipFor(
+  d: DailyNewJobsRow,
+  granularity: Granularity,
+  visibleTotal: number,
+): string {
+  const label = labelForBar(d.date, granularity);
+  const parts = STACK_ORDER.map((l) => `${LEVEL_LABEL[l]} ${d.counts[l]}`).join(" · ");
+  return `${label} — ${parts} — total ${visibleTotal}`;
 }
 
 function labelForBar(iso: string, granularity: Granularity): string {
