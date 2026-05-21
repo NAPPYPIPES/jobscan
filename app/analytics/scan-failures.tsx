@@ -5,6 +5,7 @@ const ATS_LABEL: Record<Ats, string> = {
   ashby: "Ashby",
   lever: "Lever",
   workday: "Workday",
+  workable: "Workable",
 };
 
 export type FailingTarget = {

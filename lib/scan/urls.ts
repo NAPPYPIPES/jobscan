@@ -21,6 +21,9 @@ export async function jobUrl(ats: Ats, slug: string, jobId: string): Promise<str
   if (ats === "lever") {
     return `https://jobs.lever.co/${slug}/${jobId}`;
   }
+  if (ats === "workable") {
+    return `https://apply.workable.com/${slug}/j/${jobId}/`;
+  }
   // workday
   const boards = await getWorkdayBoards();
   const cfg = boards[slug];

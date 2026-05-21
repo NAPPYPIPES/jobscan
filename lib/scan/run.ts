@@ -6,6 +6,7 @@ import { fanOutToUserMatches } from "./fanout";
 import { scanAshbyCompany } from "./adapters/ashby";
 import { scanGreenhouseCompany } from "./adapters/greenhouse";
 import { scanLeverCompany } from "./adapters/lever";
+import { scanWorkableCompany } from "./adapters/workable";
 import { scanWorkdayCompany } from "./adapters/workday";
 import { LEVEL_LABEL, type CompanyResult, type Level, type Target } from "./types";
 import { getScoringCaps } from "@/db/scoring-caps";
@@ -144,6 +145,8 @@ async function scanOne(
         return await scanLeverCompany(target, priorIds, isBaseline, vocab);
       case "workday":
         return await scanWorkdayCompany(target, priorIds, isBaseline, vocab);
+      case "workable":
+        return await scanWorkableCompany(target, priorIds, isBaseline, vocab);
     }
   } catch (err) {
     console.error(`[${target.slug}] fetch failed:`, err instanceof Error ? err.message : err);

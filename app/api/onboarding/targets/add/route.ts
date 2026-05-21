@@ -35,7 +35,7 @@ const MAX_TARGETS = 20;
 const MAX_MANUAL = 10;
 const MAX_REQUEST_LEN = 100;
 
-const SUPPORTED_ATS = new Set<Ats>(["greenhouse", "ashby", "lever", "workday"]);
+const SUPPORTED_ATS = new Set<Ats>(["greenhouse", "ashby", "lever", "workday", "workable"]);
 
 export async function POST(req: Request) {
   const userId = await getViewerUserId();

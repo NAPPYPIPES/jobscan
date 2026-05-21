@@ -2,12 +2,12 @@
 // Ats and Level from here so the scan logic is the source of truth for
 // these concepts — the DB just persists them.
 
-export type Ats = "greenhouse" | "ashby" | "lever" | "workday";
+export type Ats = "greenhouse" | "ashby" | "lever" | "workday" | "workable";
 
 // Canonical ATS list. Use this constant whenever a query needs to filter
-// on "all currently-supported ATSs" — adding a fifth ATS only requires
+// on "all currently-supported ATSs" — adding a sixth ATS only requires
 // updating the type + this constant, not grepping every inArray() call.
-export const ALL_ATSES: Ats[] = ["greenhouse", "ashby", "lever", "workday"];
+export const ALL_ATSES: Ats[] = ["greenhouse", "ashby", "lever", "workday", "workable"];
 export type Level = "BV" | "HIGH" | "MEDIUM" | "LOW";
 
 // "tech" (default) classifies titles using Silicon-Valley conventions
@@ -107,6 +107,38 @@ export type WorkdayJobDetail = {
     startDate?: string;
     jobDescription?: string;
   };
+};
+
+// Workable's public widget endpoint. GET, returns every published role
+// on the board in one response (no pagination, unlike the v3 jobs
+// endpoint which page-tokens at 10 per request). Returns title +
+// location + employment metadata but NO description text — the
+// per-job description endpoint that backs the careers SPA requires
+// auth, so this adapter runs a title-only classify path similar to
+// Workday's list path (minus the per-job hydration step Workday does,
+// because Workable doesn't expose a public per-job description API).
+//
+// `shortcode` is the stable per-job key Workable URLs use
+// (apply.workable.com/{slug}/j/{shortcode}/). We use it as the `id`.
+export type WorkableJob = {
+  shortcode: string;
+  title: string;
+  telecommuting?: boolean;
+  country?: string;
+  city?: string;
+  state?: string;
+  locations?: {
+    country?: string;
+    countryCode?: string;
+    city?: string;
+    region?: string;
+    hidden?: boolean;
+  }[];
+};
+export type WorkableResponse = {
+  name: string;
+  description: string;
+  jobs: WorkableJob[];
 };
 
 // Internal shape adapters normalize to before handing off to the shared

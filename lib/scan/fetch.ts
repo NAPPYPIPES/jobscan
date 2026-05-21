@@ -15,6 +15,14 @@ export const ashbyUrl = (slug: string) =>
 export const leverUrl = (slug: string) =>
   `https://api.lever.co/v0/postings/${slug}`;
 
+// Workable's public widget endpoint. GET; returns every published
+// role on the board in one response (no pagination). Includes title +
+// location but NOT description text — the per-job description endpoint
+// that the careers SPA uses requires auth, so the adapter runs a
+// title-only classify path similar to Workday's list path.
+export const workableUrl = (slug: string) =>
+  `https://apply.workable.com/api/v1/widget/accounts/${slug}`;
+
 // Single retry on network error or 5xx. 404 and other 4xx are real
 // answers (typo'd slug, deleted board), not transient — don't retry
 // those, would just waste a second per bad slug.

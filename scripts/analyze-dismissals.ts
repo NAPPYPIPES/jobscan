@@ -18,7 +18,7 @@ const MODEL = "claude-sonnet-4-6";
 
 type DismissalRow = {
   match_id: string;
-  ats: "greenhouse" | "ashby" | "lever" | "workday";
+  ats: "greenhouse" | "ashby" | "lever" | "workday" | "workable";
   company_slug: string;
   company_display_name: string;
   job_id: string;

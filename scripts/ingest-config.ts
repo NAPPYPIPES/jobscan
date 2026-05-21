@@ -84,7 +84,7 @@ async function ingestTargets() {
     }
     return {
       slug: r.slug,
-      ats: r.ats as "greenhouse" | "ashby" | "lever" | "workday",
+      ats: r.ats as "greenhouse" | "ashby" | "lever" | "workday" | "workable",
       displayName: r.displayName,
       sector: (r.sector ?? null) as "tech" | "finserv" | "other" | null,
       stage: (r.stage ?? null) as

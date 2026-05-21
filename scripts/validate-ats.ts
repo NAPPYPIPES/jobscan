@@ -15,7 +15,7 @@
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local" });
 
-import { ashbyUrl, greenhouseUrl, leverUrl } from "../lib/scan/fetch";
+import { ashbyUrl, greenhouseUrl, leverUrl, workableUrl } from "../lib/scan/fetch";
 import { workdayApiUrl } from "../db/workday-tenants";
 import { getTargets } from "../db/targets";
 import type { Target } from "../db/schema";
@@ -58,6 +58,13 @@ async function checkOne(t: Target): Promise<Result> {
       if (!res.ok) return { ...base, note: `HTTP ${res.status}` };
       const data = (await res.json()) as unknown[];
       const count = Array.isArray(data) ? data.length : 0;
+      return { ...base, status: count > 0 ? "ok" : "fail", count, note: count > 0 ? "" : "0 jobs returned" };
+    }
+    if (t.ats === "workable") {
+      const res = await fetch(workableUrl(t.slug));
+      if (!res.ok) return { ...base, note: `HTTP ${res.status}` };
+      const data = (await res.json()) as { jobs?: unknown[] };
+      const count = data.jobs?.length ?? 0;
       return { ...base, status: count > 0 ? "ok" : "fail", count, note: count > 0 ? "" : "0 jobs returned" };
     }
     if (t.ats === "workday") {
