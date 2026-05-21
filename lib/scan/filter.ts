@@ -223,6 +223,31 @@ const LOW_KEYWORDS = [
   "partner", "partners",
 ];
 
+// Sector-neutral leadership domains. A "Head of Strategy and Operations"
+// or "Head of AI Adoption" has no GTM token in the title but the JD
+// frequently describes GTM outcomes (revenue attribution, seller
+// enablement, pipeline). We default head/vp/director + these tokens to
+// MEDIUM so the description reaches Sonnet, which can read the JD and
+// confirm or reject the GTM angle. Engineering variants ("Director,
+// Engineering Strategy") are already filtered by ENGINEERING_FUNCTION_
+// SKIPS upstream, so this branch doesn't reopen the engineering door.
+const STRATEGY_LEADERSHIP_DOMAINS = [
+  "strategy",
+  "operations",
+  "activation",
+  "growth",
+  "transformation",
+  "enablement",
+  "commercialization",
+  "ai strategy",
+  "ai adoption",
+  "ai rollout",
+  "ai transformation",
+  "ai enablement",
+  "ai capability",
+  "ai use case",
+];
+
 const SENIORITY_HIGH = ["head", "vp"];
 const SENIORITY_MED = ["director"];
 const GTM_TOKENS = ["sales", "gtm", "revenue"];
@@ -274,6 +299,16 @@ function classifyRoleTech(
   if (hasGtmToken && SENIORITY_HIGH.some((s) => hasKeyword(n, s))) return "HIGH";
   if (MEDIUM_PHRASES.some((p) => hasKeyword(n, p))) return "MEDIUM";
   if (hasGtmToken && SENIORITY_MED.some((s) => hasKeyword(n, s))) return "MEDIUM";
+
+  // Strategy-leadership branch — see STRATEGY_LEADERSHIP_DOMAINS header.
+  const isSenior =
+    SENIORITY_HIGH.some((s) => hasKeyword(n, s)) ||
+    SENIORITY_MED.some((s) => hasKeyword(n, s));
+  if (
+    isSenior &&
+    STRATEGY_LEADERSHIP_DOMAINS.some((d) => hasKeyword(n, d))
+  ) return "MEDIUM";
+
   if (LOW_KEYWORDS.some((w) => hasKeyword(n, w))) return "LOW";
   return permissive ? "MEDIUM" : null;
 }
