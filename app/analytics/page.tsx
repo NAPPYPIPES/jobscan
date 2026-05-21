@@ -11,6 +11,10 @@ import TopCompaniesList, {
 import CompactRow from "../_components/compact-row";
 import { DailySpendChart, type DailySpendRow } from "../docs/daily-spend-chart";
 import {
+  DailyNewJobsChart,
+  type DailyNewJobsRow,
+} from "./daily-new-jobs-chart";
+import {
   JobsByCompany,
   JobsByFit,
   JobsByLevel,
@@ -270,6 +274,27 @@ export default async function Analytics() {
     lastSuccessIso: r.last_success_at ? new Date(r.last_success_at).toISOString() : null,
   }));
 
+  // ─── New jobs per day (scoped to the viewer's watchlist) ──────────
+  // Pull matches.first_seen counts per UTC day for the last 90 days,
+  // joined through user_matches → the user's targets. Excludes baseline
+  // imports (those are intentional bulk adds, not net-new discoveries).
+  // Returned to the client zero-padded; the chart pads missing days.
+  const dailyNewJobsRows = await db.execute(sql`
+    SELECT
+      to_char(date_trunc('day', m.first_seen at time zone 'UTC'), 'YYYY-MM-DD') AS date,
+      count(*)::int AS count
+    FROM user_matches um
+    JOIN matches m ON m.id = um.match_id
+    WHERE um.user_id = ${userId}
+      AND um.is_baseline = false
+      AND m.first_seen >= now() - interval '90 days'
+    GROUP BY date_trunc('day', m.first_seen at time zone 'UTC')
+    ORDER BY date_trunc('day', m.first_seen at time zone 'UTC')
+  `);
+  const dailyNewJobs: DailyNewJobsRow[] = (
+    dailyNewJobsRows.rows as { date: string; count: number }[]
+  ).map((r) => ({ date: r.date, count: r.count }));
+
   // ─── Personal-data sections (skipped entirely in demo mode) ───────
   // Dismissal patterns + API spend reveal the viewer's actual
   // job-search activity. Skip the queries in demo to save round
@@ -443,6 +468,13 @@ export default async function Analytics() {
           rows={closedWithUrls}
           totalCount={closedTotal}
         />
+      </section>
+
+      <section className="mb-10">
+        <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
+          New jobs posted
+        </h2>
+        <DailyNewJobsChart data={dailyNewJobs} />
       </section>
 
       <div className="mb-10">

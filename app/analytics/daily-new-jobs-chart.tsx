@@ -2,14 +2,17 @@
 
 import { useMemo, useState } from "react";
 
-// API spend bar chart with granularity (day / week) and range
-// selectors. Receives raw daily rows from the server (only days with
-// calls are present); the client component pads zero-spend gaps,
-// optionally aggregates to weekly buckets, and renders pure-CSS bars.
-// No chart library — for ~12-90 vertical divs the cost of importing
-// Recharts isn't worth it.
+// Daily / weekly new-jobs bar chart, parallel in structure to
+// app/docs/daily-spend-chart.tsx. Receives raw daily rows (only days
+// with arrivals are present); the client pads zero gaps, optionally
+// aggregates to weekly buckets, and renders pure-CSS bars plus an
+// average line.
+//
+// "New jobs" = matches.first_seen rows where is_baseline = false
+// (intentional bulk imports excluded). See the server query in
+// app/analytics/page.tsx.
 
-export type DailySpendRow = { date: string; spendUsd: number };
+export type DailyNewJobsRow = { date: string; count: number };
 
 type Granularity = "day" | "week";
 
@@ -29,7 +32,7 @@ const RANGES: Record<Granularity, readonly { units: number; label: string }[]> =
 
 const DEFAULT_RANGE: Record<Granularity, number> = { day: 14, week: 8 };
 
-export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
+export function DailyNewJobsChart({ data }: { data: DailyNewJobsRow[] }) {
   const [granularity, setGranularity] = useState<Granularity>("day");
   const [units, setUnits] = useState<number>(DEFAULT_RANGE.day);
 
@@ -41,13 +44,10 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
     [data, granularity, units],
   );
 
-  const total = padded.reduce((sum, d) => sum + d.spendUsd, 0);
+  const total = padded.reduce((sum, d) => sum + d.count, 0);
   const avg = padded.length > 0 ? total / padded.length : 0;
-  const maxSpend = Math.max(...padded.map((d) => d.spendUsd), 0);
-  const yMax = niceUpper(maxSpend);
-  // Position the avg line as % from the TOP of the chart (0 = top, 100 = bottom).
-  // Clamp so the line doesn't sit exactly on the baseline (where it'd be
-  // hidden by the border) and doesn't clip above the top.
+  const maxCount = Math.max(...padded.map((d) => d.count), 0);
+  const yMax = niceUpper(maxCount);
   const avgFromTopPct = yMax > 0 ? Math.min(99, Math.max(1, 100 - (avg / yMax) * 100)) : 100;
 
   const labelEvery = Math.max(1, Math.ceil(padded.length / 7));
@@ -58,17 +58,15 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-            {granularity === "day" ? "Daily spend" : "Weekly spend"}
+            {granularity === "day" ? "Daily new jobs" : "Weekly new jobs"}
           </h3>
           <p className="mt-0.5 text-xs text-fg-subtle">
-            <span className="font-mono tabular-nums text-fg">
-              ${total.toFixed(2)}
-            </span>{" "}
+            <span className="font-mono tabular-nums text-fg">{total}</span>{" "}
             in last {units} {unitLabel}
             <span className="mx-1.5 text-fg-faint">·</span>
             avg{" "}
             <span className="font-mono tabular-nums text-fg">
-              ${avg.toFixed(2)}
+              {avg.toFixed(1)}
             </span>{" "}
             / {granularity === "day" ? "day" : "week"}
           </p>
@@ -115,20 +113,20 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
       <div className="relative">
         <div className="relative flex h-32 items-end gap-[1px] border-b border-l border-line pl-2 pr-1 pt-1">
           {padded.map((d) => {
-            const heightPct = yMax === 0 ? 0 : (d.spendUsd / yMax) * 100;
+            const heightPct = yMax === 0 ? 0 : (d.count / yMax) * 100;
             return (
               <div
                 key={d.date}
                 className="group relative flex h-full flex-1 items-end"
-                title={`${labelForBar(d.date, granularity)} — $${d.spendUsd.toFixed(4)}`}
+                title={`${labelForBar(d.date, granularity)} — ${d.count} job${d.count === 1 ? "" : "s"}`}
               >
                 <div
                   className={`w-full rounded-sm transition-colors ${
-                    d.spendUsd > 0
-                      ? "bg-emerald-500 group-hover:bg-emerald-600 dark:bg-emerald-400 dark:group-hover:bg-emerald-300"
+                    d.count > 0
+                      ? "bg-indigo-500 group-hover:bg-indigo-600 dark:bg-indigo-400 dark:group-hover:bg-indigo-300"
                       : "bg-muted group-hover:bg-line"
                   }`}
-                  style={{ height: `${Math.max(heightPct, d.spendUsd > 0 ? 2 : 1)}%` }}
+                  style={{ height: `${Math.max(heightPct, d.count > 0 ? 2 : 1)}%` }}
                 />
               </div>
             );
@@ -137,12 +135,12 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
             <div
               className="pointer-events-none absolute inset-x-0 border-t border-dashed border-fg-subtle/60"
               style={{ top: `${avgFromTopPct}%` }}
-              title={`Avg $${avg.toFixed(4)} per ${granularity === "day" ? "day" : "week"}`}
+              title={`Avg ${avg.toFixed(1)} per ${granularity === "day" ? "day" : "week"}`}
             />
           )}
         </div>
         <div className="pointer-events-none absolute right-1 top-0 font-mono text-[10px] tabular-nums text-fg-subtle">
-          ${yMax.toFixed(2)}
+          {yMax}
         </div>
       </div>
 
@@ -159,34 +157,30 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
   );
 }
 
-function buildDailyRange(data: DailySpendRow[], days: number): DailySpendRow[] {
-  const map = new Map(data.map((d) => [d.date, d.spendUsd]));
-  const out: DailySpendRow[] = [];
+function buildDailyRange(data: DailyNewJobsRow[], days: number): DailyNewJobsRow[] {
+  const map = new Map(data.map((d) => [d.date, d.count]));
+  const out: DailyNewJobsRow[] = [];
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(today);
     d.setUTCDate(d.getUTCDate() - i);
     const iso = d.toISOString().slice(0, 10);
-    out.push({ date: iso, spendUsd: map.get(iso) ?? 0 });
+    out.push({ date: iso, count: map.get(iso) ?? 0 });
   }
   return out;
 }
 
-// Bucket daily rows into ISO weeks (Mon-Sun) ending at the current
-// UTC week. Each bucket's `date` is its Monday in YYYY-MM-DD; tooltips
-// resolve that to "Mar 11 – Mar 17".
-function buildWeeklyRange(data: DailySpendRow[], weeks: number): DailySpendRow[] {
-  const dailyMap = new Map(data.map((d) => [d.date, d.spendUsd]));
+function buildWeeklyRange(data: DailyNewJobsRow[], weeks: number): DailyNewJobsRow[] {
+  const dailyMap = new Map(data.map((d) => [d.date, d.count]));
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
-  // Most recent Monday on/before today (UTC). getUTCDay: 0=Sun, 1=Mon.
   const dow = today.getUTCDay();
   const offsetToMonday = (dow + 6) % 7;
   const currentWeekStart = new Date(today);
   currentWeekStart.setUTCDate(currentWeekStart.getUTCDate() - offsetToMonday);
 
-  const out: DailySpendRow[] = [];
+  const out: DailyNewJobsRow[] = [];
   for (let w = weeks - 1; w >= 0; w--) {
     const weekStart = new Date(currentWeekStart);
     weekStart.setUTCDate(weekStart.getUTCDate() - w * 7);
@@ -197,16 +191,19 @@ function buildWeeklyRange(data: DailySpendRow[], weeks: number): DailySpendRow[]
       const iso = day.toISOString().slice(0, 10);
       sum += dailyMap.get(iso) ?? 0;
     }
-    out.push({ date: weekStart.toISOString().slice(0, 10), spendUsd: sum });
+    out.push({ date: weekStart.toISOString().slice(0, 10), count: sum });
   }
   return out;
 }
 
+// "Nice" integer upper bound for a job-count axis. Pick the smallest
+// bucket >= max so bars never reach the top edge and the avg-line
+// label position is stable.
 function niceUpper(max: number): number {
-  if (max <= 0) return 0.1;
-  const buckets = [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 50, 100];
+  if (max <= 0) return 5;
+  const buckets = [5, 10, 25, 50, 100, 200, 400, 800, 1500, 3000];
   for (const b of buckets) if (max <= b) return b;
-  return Math.ceil(max / 50) * 50;
+  return Math.ceil(max / 1000) * 1000;
 }
 
 function labelForBar(iso: string, granularity: Granularity): string {
@@ -219,7 +216,6 @@ function labelForBar(iso: string, granularity: Granularity): string {
 
 function labelForAxis(iso: string, granularity: Granularity): string {
   if (granularity === "day") return shortDate(iso);
-  // Weekly axis shows just the start-of-week date — keeps it short.
   return shortDate(iso);
 }
 
