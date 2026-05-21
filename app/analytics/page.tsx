@@ -456,21 +456,6 @@ export default async function Analytics() {
       </section>
 
       <section className="mb-10">
-        <ScanFailures
-          latestSuccessIso={latestSuccessIso}
-          targets={failingTargets}
-        />
-      </section>
-
-      <section className="mb-10">
-        <ClosedRoles
-          latestScanIso={latestSuccessIso}
-          rows={closedWithUrls}
-          totalCount={closedTotal}
-        />
-      </section>
-
-      <section className="mb-10">
         <h2 className="mb-4 text-sm font-semibold tracking-tight text-fg-muted">
           New jobs posted
         </h2>
@@ -489,6 +474,22 @@ export default async function Analytics() {
           <DailySpendChart data={dailySpend} />
         </section>
       )}
+
+      <section className="mb-10">
+        <ScanFailures
+          latestSuccessIso={latestSuccessIso}
+          targets={failingTargets}
+        />
+      </section>
+
+      <section className="mb-10">
+        <ClosedRoles
+          latestScanIso={latestSuccessIso}
+          rows={closedWithUrls}
+          totalCount={closedTotal}
+        />
+      </section>
+
 
       {!isDemo && (
         <section className="mb-10">
