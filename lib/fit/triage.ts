@@ -16,8 +16,6 @@
 //     in escalation.ts always escalates true → Sonnet (subject to cap)
 //     regardless of tier1_score. Better to pay $0.018 for Sonnet to
 //     reject a Haiku false-positive than to miss a real BV match.
-//   - Healthcare exclusion baked in at Tier 1 — cheaper to drop
-//     healthcare roles here than escalate them to Sonnet.
 
 import Anthropic from "@anthropic-ai/sdk";
 import { getRawResume } from "@/db/profile";
@@ -162,8 +160,6 @@ This is a hard cap on TITLE alone — do not give these a score above 2
 even if the JD is enterprise B2B / right industry / great company.
 The candidate would not consider these and they should not hit the
 radar.
-
-If the role is clearly healthcare/health-tech-focused (provider, payer, biotech, medical device, healthtech): tier1_score ≤ 2, is_potential_bv = false, note "healthcare" in quick_take.
 
 LOCATION FILTER — STRICT. The candidate is based in NYC and only
 considers roles that are EITHER:

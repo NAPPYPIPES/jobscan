@@ -228,17 +228,16 @@ const SENIORITY_MED = ["director"];
 const GTM_TOKENS = ["sales", "gtm", "revenue"];
 
 // Top-level entry point. Dispatches on sector. Personal vocab
-// (healthcare_skips, bv_phrases) is passed in by the caller — see the
-// run.ts / core.ts call chain.
+// (bv_phrases) is passed in by the caller — see the run.ts / core.ts
+// call chain.
 //
 // `permissive`: when true, roles that pass every hard-skip filter but
 // don't match a positive HIGH/MED/LOW domain pattern default to MEDIUM
 // (instead of null). Used by the Workday adapter where the cheap
 // title-only classifier is too narrow — Haiku will triage everything
 // in-scope and Sonnet escalates the keepers. Hard-skip filters
-// (engineering, recruiter, healthcare, location, sub-target seniority,
-// finserv non-GTM/tech) still apply so we don't burn AI calls on obvious
-// noise.
+// (engineering, recruiter, location, sub-target seniority, finserv
+// non-GTM/tech) still apply so we don't burn AI calls on obvious noise.
 export function classifyRole(
   title: string,
   sector: Sector,
@@ -249,10 +248,6 @@ export function classifyRole(
   const n = normalizeTitle(title);
   for (const w of UNIVERSAL_HARD_SKIPS) {
     if (hasKeyword(n, w)) return null;
-  }
-  for (const w of vocab.healthcareSkips) {
-    const np = w.replace(/[^a-z0-9]+/g, " ").trim();
-    if (hasKeyword(n, np)) return null;
   }
   if (location && isLocationDisqualified(location)) return null;
   return sector === "finserv"

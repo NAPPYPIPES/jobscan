@@ -10,8 +10,8 @@
 //     the user's target_roles / industries / seniority / etc. at call
 //     time so the rubric stays user-agnostic in code.
 //   - hardExclusions: flag names the model can set that force a 0.0
-//     overall regardless of dimension scores. Defaults to healthcare
-//     and relocation; remove either if it isn't a hard line for you.
+//     overall regardless of dimension scores. Defaults to relocation
+//     only; add or remove flags if your thesis differs.
 //   - icRoleCap: ceiling applied when the model sets the ic_role flag.
 //     Defaults to 7.9, which keeps strong AE roles out of the digest
 //     (HIGH band starts at 8.0). Set to 10.0 to disable the cap.
@@ -151,7 +151,7 @@ export const DEFAULT_RUBRIC: ScoringRubric = {
       },
     },
   },
-  hardExclusions: ["healthcare_excluded", "relocation_required"],
+  hardExclusions: ["relocation_required"],
   icRoleCap: 7.9,
   alertThreshold: 7.5,
 };

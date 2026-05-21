@@ -59,7 +59,6 @@ export function makeUserCapCheck(userId: string): CapCheckFn {
 
 export type FitFlag =
   | "none"
-  | "healthcare_excluded"
   | "relocation_required"
   | "level_mismatch"
   | "ic_role"
@@ -248,7 +247,6 @@ resume↔JD alignment is unusually strong (or unusually weak).
 ================================================================
 FLAG RULES — set exactly one
 ================================================================
-- "healthcare_excluded": role is healthcare-focused — drop industry to 0 and set this flag. HARD: forces level_recommendation = LOW and composite = 0.
 - "relocation_required": role is NOT in NYC, NYC metro (Westchester, Long Island, Northern NJ commute corridor, southern CT), OR US-remote. Set this whenever:
     (a) The location field names a non-NYC US city (SF, LA, Austin, Boston, Chicago, Seattle, Denver, Atlanta, Dallas, Miami, DC-only, Portland, etc.) without a remote / NYC-hybrid option, OR
     (b) The role is anchored to a non-Northeast US region (Account Executive - West, RVP Pacific Northwest, Sales Director - Bay Area, Account Manager LATAM, Strategic Sales EMEA, etc.) — even if the location field looks generous, the title carries the constraint, OR
@@ -305,7 +303,6 @@ LOW — adjacent or stretched roles not worth alerting on, OR hard exclusions, O
 
 Internal consistency required:
   - flag = "bv_role"             → level_recommendation = "BV"
-  - flag = "healthcare_excluded" → level_recommendation = "LOW"
   - flag = "level_mismatch"      → level_recommendation = "LOW"
   - flag = "relocation_required" → level_recommendation = "LOW"
   - flag = "ic_role"             → MEDIUM default; HIGH / LOW allowed per the soft rule above. Justify any non-MEDIUM call in the summary.
@@ -367,7 +364,7 @@ under-score the role. Apply these BV-specific overrides:
   industry:  AI-native (OpenAI, Anthropic, Databricks, Cohere, Glean,
              Cursor, Sierra) and enterprise SaaS / fintech BV roles
              score 9-10. Only downgrade for genuinely off-thesis
-             companies (consumer B2C, crypto-only, healthcare).
+             companies (consumer B2C, crypto-only).
 
   stage:     Use the default rubric anchors — BV doesn't change stage
              fit math.
@@ -397,7 +394,6 @@ Calibration examples (target overall scores):
   - "Staff Value Engineer" at Twilio                                  → 9.4 (BV-eligible; true staff-IC; AI-adjacent industry softness)
   - "Director of Value Engineering" at MongoDB                        → 9.7
   - "Value Consultant" at Manager level at any company                → NOT BV → assign HIGH
-  - "Value Engineer" at a healthcare-vertical company                 → BV-titled but flag healthcare_excluded, level LOW
 
 Crucial: under the BV-specific seniority scale, true STAFF-IC tier
 (Staff / Principal / Distinguished / Lead / Senior Principal prefix) at
@@ -424,7 +420,7 @@ Return this JSON exactly. No other text. No markdown fences.
     "location": <0.0–10.0>
   },
   "summary": "<one sentence, max 30 words>",
-  "flag": "none" | "healthcare_excluded" | "relocation_required" | "level_mismatch" | "ic_role" | "bv_role" | "partnerships_specialist",
+  "flag": "none" | "relocation_required" | "level_mismatch" | "ic_role" | "bv_role" | "partnerships_specialist",
   "level_recommendation": "BV" | "HIGH" | "MEDIUM" | "LOW",
   "bv_reasoning": "<one short sentence — REQUIRED if level_recommendation = BV; empty string otherwise>"
 }`;
@@ -668,7 +664,6 @@ function parseFitJson(text: string, rubric: ScoringRubric): FitScore | null {
   }
   const validFlags: FitFlag[] = [
     "none",
-    "healthcare_excluded",
     "relocation_required",
     "level_mismatch",
     "ic_role",
@@ -697,13 +692,13 @@ function parseFitJson(text: string, rubric: ScoringRubric): FitScore | null {
   };
   const f_flag = flag as FitFlag;
 
-  // Internal-consistency enforcement. Hard flags (bv_role, healthcare,
-  // relocation, level_mismatch) still force a specific level — those
-  // are policy decisions. ic_role and partnerships_specialist are now
-  // SOFT in the prompt — Sonnet can elevate them to HIGH or drop them
-  // to LOW based on resume↔JD alignment, so no code-side cap. The
-  // numerical IC score cap (rubric.icRoleCap) still applies via
-  // computeScore() as a separate guard.
+  // Internal-consistency enforcement. Hard flags (bv_role, relocation,
+  // level_mismatch) still force a specific level — those are policy
+  // decisions. ic_role and partnerships_specialist are now SOFT in the
+  // prompt — Sonnet can elevate them to HIGH or drop them to LOW based
+  // on resume↔JD alignment, so no code-side cap. The numerical IC
+  // score cap (rubric.icRoleCap) still applies via computeScore() as a
+  // separate guard.
   //
   // BV → BV upgrade is still allowed: if Sonnet flags bv_role it must
   // mean BV; downgrades to anything else would silently lose BV signal.
@@ -714,8 +709,7 @@ function parseFitJson(text: string, rubric: ScoringRubric): FitScore | null {
     levelRecommendation = "BV";
   }
   if (
-    (f_flag === "healthcare_excluded" ||
-      f_flag === "relocation_required" ||
+    (f_flag === "relocation_required" ||
       f_flag === "level_mismatch") &&
     levelRecommendation !== "LOW"
   ) {
