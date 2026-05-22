@@ -207,6 +207,14 @@ const UNIVERSAL_HARD_SKIPS = [
 
 const HIGH_PHRASES = [
   "vp sales", "vp gtm", "head sales", "head gtm", "head revenue", "cro",
+  // Startup / exec leadership. CTO + Chief Technology are killed
+  // upstream by hitsEngineeringSkip, so adding bare "chief" here is
+  // safe. "chief staff" matches "Chief of Staff" after normalizeTitle
+  // strips the "of".
+  "coo", "chief operating officer",
+  "chief commercial officer", "chief customer officer",
+  "chief strategy officer", "chief staff",
+  "president", "general manager", "gm",
 ];
 
 const MEDIUM_PHRASES = [
@@ -239,6 +247,8 @@ const STRATEGY_LEADERSHIP_DOMAINS = [
   "transformation",
   "enablement",
   "commercialization",
+  "staff",
+  "operator",
   "ai strategy",
   "ai adoption",
   "ai rollout",
@@ -248,7 +258,10 @@ const STRATEGY_LEADERSHIP_DOMAINS = [
   "ai use case",
 ];
 
-const SENIORITY_HIGH = ["head", "vp"];
+// "chief" and "founding" added for startup exec titles (Chief X Officer,
+// Founding GTM, Founding Operator). hitsEngineeringSkip runs first and
+// kills CTO/Chief Technology before this branch is reached.
+const SENIORITY_HIGH = ["head", "vp", "chief", "founding"];
 const SENIORITY_MED = ["director"];
 const GTM_TOKENS = ["sales", "gtm", "revenue"];
 
@@ -372,6 +385,8 @@ const FINSERV_HIGH_CHIEF_PHRASES = [
   "chief sales officer",
   "chief customer officer",
   "chief commercial officer",
+  "chief operating officer",
+  "chief staff", // matches "Chief of Staff" after normalizeTitle strips "of"
 ];
 
 // vocab is currently unused in finserv path — finserv-specific BV

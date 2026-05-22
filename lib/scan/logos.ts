@@ -33,6 +33,27 @@ export const COMPANY_DOMAINS: Record<string, string> = {
   // Workday
   salesforce:  "salesforce.com",
   adobe:       "adobe.com",
+  // Ashby additions (NYC AI/fintech batch)
+  "Talos-Trading":  "talos.com",
+  casap:            "casaphq.com",
+  noetica:          "noetica.ai",
+  crosby:           "crosby.ai",
+  "basis-ai":       "getbasis.ai",
+  stainlessapi:     "stainless.com",
+  tennr:            "tennr.com",
+  // Greenhouse additions
+  grafanalabs:      "grafana.com",
+  axonius:          "axonius.com",
+  fartherfinance:   "farther.com",
+  keychain:         "keychain.com",
+  eonio:            "eon.io",
+  momentmarkets:    "moment.com",
+  mesh:             "meshpay.com",
+  dailyharvest:     "daily-harvest.com",
+  Wizinc:           "wiz.io",
+  // Workable / Lever additions
+  "65604e1dc49ce253c9f6ee5f": "aiera.com",
+  chaoslabs:        "chaoslabs.xyz",
 };
 
 // Google's favicon service. Reliable, no API key, returns the brand
