@@ -445,6 +445,22 @@ function classifyRoleFinserv(
   // separate exchange/fintech AVP-leaders from bank AVP-juniors.
   if (hasKeyword(n, "avp")) return "MEDIUM";
 
+  // Strategy-leadership branch — mirrors STRATEGY_LEADERSHIP_DOMAINS
+  // in the tech path. A finserv "Head of Client Strategy & Operations"
+  // or "Director of Transformation" has no GTM/sales token in the
+  // title but the JD frequently describes a GTM-adjacent leadership
+  // scope (client lifecycle, commercial ops, enablement). Default to
+  // MEDIUM so it enters the AI scoring pool; FINSERV_NONGTM_SKIPS
+  // already removes risk/compliance/audit/etc. variants upstream.
+  const isSenior =
+    hasKeyword(n, "head") ||
+    hasKeyword(n, "vp") ||
+    hasKeyword(n, "chief") ||
+    hasKeyword(n, "director");
+  if (isSenior && STRATEGY_LEADERSHIP_DOMAINS.some((d) => hasKeyword(n, d))) {
+    return "MEDIUM";
+  }
+
   if (hasKeyword(n, "managing director")) return "LOW";
   if (hasKeyword(n, "vp")) return "LOW";
 
