@@ -16,7 +16,9 @@
 //     Defaults to 7.9, which keeps strong AE roles out of the digest
 //     (HIGH band starts at 8.0). Set to 10.0 to disable the cap.
 //   - alertThreshold: minimum fit_score for inclusion in the daily
-//     digest. Defaults to 7.5.
+//     digest. Defaults to 7.0 (was 7.5 — lowered 2026-05-25 after
+//     observing strong-fit roles landing at 7.0-7.4 and missing the
+//     digest).
 
 export type DimensionAnchor = {
   score: number;
@@ -153,7 +155,7 @@ export const DEFAULT_RUBRIC: ScoringRubric = {
   },
   hardExclusions: ["relocation_required"],
   icRoleCap: 7.9,
-  alertThreshold: 7.5,
+  alertThreshold: 7.0,
 };
 
 // Validate at module load — catches a typo or bad edit that would

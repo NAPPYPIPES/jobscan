@@ -15,14 +15,18 @@ import { scoreUnscoredEligibleForUser } from "@/lib/fit/score";
 // the second curl step. See .github/workflows/cron.yml.
 export const maxDuration = 60;
 
-// Bumped 2026-05-25: 8/45s was leaving a chronic 200+ row unscored
-// backlog (drain rate < add rate even when cron fired reliably). With
-// 25/55s a typical tick processes 10-18 rows depending on description
-// fetch latency, still well under the function's 60s ceiling. The
-// caller's monthly spend cap (scoring_caps.monthlyCapsUsd.score) is the
-// real budget guardrail — at $35/mo we have headroom for ~700 Sonnet
-// scores, far beyond what hourly add-rate produces.
-const PER_USER_BATCH_LIMIT = 25;
+// Bumped 2026-05-25 again: scan cron moved from hourly to 3-hourly
+// (see .github/workflows/cron.yml), so each fire now needs to drain
+// ~3 hours of accumulated arrivals instead of 1. With ~200 targets
+// and observed ~50 new BV/HIGH/MEDIUM rows/day, a 3-hour bucket is
+// roughly 6-8 fresh rows to score per fire. The cron step calls
+// /score 4 times back-to-back per fire (see workflow), so per-tick
+// capacity = 50 rows × 4 passes = 200 rows per fire. Time budget is
+// still the real ceiling: Sonnet calls average 3-6s, so a tick
+// hitting many Sonnet escalations cuts off around ~15-20 rows
+// regardless of batch limit; the limit just prevents over-querying
+// when most rows resolve at Tier-1.
+const PER_USER_BATCH_LIMIT = 50;
 const TOTAL_TIME_BUDGET_MS = 55_000;
 
 export async function GET(req: Request) {
