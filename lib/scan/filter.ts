@@ -203,6 +203,11 @@ function hitsEngineeringSkip(normalized: string): boolean {
 
 const UNIVERSAL_HARD_SKIPS = [
   "recruiter", "recruiting",
+  // Admin support to executives is NOT an exec role. Pre-empts the
+  // chief-phrase HIGH match: titles like "Executive Assistant, Chief
+  // Commercial Officer" contain the verbatim CCO phrase and were
+  // mis-flagged HIGH before this skip ran.
+  "executive assistant", "administrative assistant",
 ];
 
 const HIGH_PHRASES = [

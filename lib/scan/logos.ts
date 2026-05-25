@@ -54,6 +54,10 @@ export const COMPANY_DOMAINS: Record<string, string> = {
   // Workable / Lever additions
   "65604e1dc49ce253c9f6ee5f": "aiera.com",
   chaoslabs:        "chaoslabs.xyz",
+  // Greenhouse additions (asana / addepar / maintainx batch)
+  asana:            "asana.com",
+  addepar1:         "addepar.com",
+  maintainx:        "getmaintainx.com",
 };
 
 // Google's favicon service. Reliable, no API key, returns the brand

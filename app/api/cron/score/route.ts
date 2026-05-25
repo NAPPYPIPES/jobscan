@@ -15,8 +15,15 @@ import { scoreUnscoredEligibleForUser } from "@/lib/fit/score";
 // the second curl step. See .github/workflows/cron.yml.
 export const maxDuration = 60;
 
-const PER_USER_BATCH_LIMIT = 8;
-const TOTAL_TIME_BUDGET_MS = 45_000;
+// Bumped 2026-05-25: 8/45s was leaving a chronic 200+ row unscored
+// backlog (drain rate < add rate even when cron fired reliably). With
+// 25/55s a typical tick processes 10-18 rows depending on description
+// fetch latency, still well under the function's 60s ceiling. The
+// caller's monthly spend cap (scoring_caps.monthlyCapsUsd.score) is the
+// real budget guardrail — at $35/mo we have headroom for ~700 Sonnet
+// scores, far beyond what hourly add-rate produces.
+const PER_USER_BATCH_LIMIT = 25;
+const TOTAL_TIME_BUDGET_MS = 55_000;
 
 export async function GET(req: Request) {
   // Same bearer-auth pattern as /api/cron/scan. Locally CRON_SECRET
