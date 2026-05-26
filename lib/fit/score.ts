@@ -283,6 +283,91 @@ accordingly:
   function at a FinServ-branded company, it's vendor work → score
   normally.
 
+VERTICAL / DOMAIN SPECIALTY — match the JD's REQUIRED SKILLS to the
+RESUME's demonstrated work, not to the title.
+
+"GTM" or "Sales Leader" or "Director of Revenue" in the title is NOT
+enough. Many of these roles require a specific domain specialty in the
+buyer / product / motion. Before assigning HIGH, identify 2-3 explicit
+required skills from the JD and confirm they appear in the candidate's
+resume. If you can't, drop to MEDIUM or LOW even when the title looks
+GTM-shaped.
+
+  The candidate's DEMONSTRATED specialties (score normally when JD
+  required skills overlap with these):
+    - Financial services vertical — vendor selling INTO banks /
+      insurers / asset managers / wealth platforms / exchanges
+    - Generic enterprise SaaS GTM (multi-stakeholder F500 deals,
+      complex eval cycles, value-based selling)
+    - Business Value / ROI quantification / TCO modeling / executive
+      narrative work
+    - Value Engineering practice leadership (team build, methodology,
+      onboarding, customer-facing deliverables)
+    - Sales / GTM leadership at Director-and-above (team management,
+      quota carry across reps, capacity planning, partner enablement)
+    - Strategy & Operations adjacent to GTM (revenue ops, capacity
+      planning, GTM org design, transformation)
+
+  The candidate does NOT have demonstrated specialty in (default
+  MEDIUM-to-LOW for roles whose JD required skills lean on these
+  domains, even if the title says "GTM Leader" or "Director, Sales"):
+    - CYBERSECURITY products — threat detection, SIEM/SOC, XDR/EDR,
+      vulnerability management, zero-trust, identity security,
+      CASB/SASE, GRC products, security operations. A "GTM Cyber
+      Leader" or "Enterprise Security Sales" role requires the
+      candidate to have sold security products / built relationships
+      with CISOs / understands the security buyer journey. They have
+      not done this. Default LOW unless JD describes the role as
+      generic enterprise GTM with light security context.
+    - OBSERVABILITY / DEVOPS / INFRA technical sales — Datadog
+      observability domain, K8s/cloud-native, SRE buyer, platform
+      engineering. The candidate is not a technical infra seller.
+    - HEALTHCARE / CLINICAL / LIFE SCIENCES — payers, providers,
+      EHR/EMR, clinical workflows, pharma R&D, life sciences
+      commercial.
+    - PUBLIC SECTOR / FEDERAL / SLED / DOD — gov procurement cycles,
+      FedRAMP, GSA schedules, defense buying.
+    - GAMING / CONSUMER / CREATIVE TOOLS — Adobe creative side,
+      gaming engines, consumer app commerce.
+    - CRYPTO / WEB3 / BLOCKCHAIN — exchange ops, DeFi, NFT, custody.
+    - TELECOM / MEDIA / ENTERTAINMENT vertical-specific GTM — TMT
+      industry advisors, content monetization, distribution.
+    - HR / PEOPLE / TALENT TECH — HCM, ATS, talent intelligence.
+    - DATA SCIENCE / ML / RESEARCH TECHNICAL leadership.
+
+  IMPORTANT: the candidate CAN work AT a company in these spaces if
+  the role is GENERIC GTM leadership (e.g. "VP Sales" at Palo Alto
+  where the JD describes leading a sales org, not personally selling
+  security products). The distinction is whether the JD's required
+  skills demand domain expertise the candidate doesn't have. When in
+  doubt, read the "Required Skills" / "Qualifications" / "Experience"
+  section of the JD literally — if it lists 5-10+ years selling
+  [specific product category] or relationships with [specific buyer
+  persona], and the candidate hasn't done that, drop the function
+  score.
+
+  Examples of CORRECT calls under this lens:
+    - OpenAI "GTM Cyber Security Leader" → LOW (specialty role,
+      candidate has no cybersecurity GTM background)
+    - Datadog "Area VP, Enterprise Security Sales" → LOW (security
+      products specialty)
+    - Palo Alto "VP, Sales" (generic Americas leadership, JD says
+      build/run sales org) → can be HIGH (generic GTM leadership)
+    - Salesforce "Account Partner Senior Director, Financial
+      Services" → HIGH (FinServ vendor lane)
+    - Salesforce "Account Partner Senior Director, TMT" → MEDIUM
+      (vertical mismatch; can be HIGH if JD reads as generic
+      enterprise sales leadership where TMT is just the assigned
+      patch)
+    - Adobe "Firefly Foundry Growth Director" → MEDIUM (creative-
+      tool vertical adjacency; LOW if JD is product-marketing-
+      heavy creative-tools work)
+    - Anaplan "Sr. Director, Finance Transformation" → MEDIUM
+      (Finance Transformation requires F&A / FP&A consulting
+      domain; the candidate is GTM, not F&A — only HIGH if JD is
+      about selling finance transformation services, not doing
+      them)
+
 Default lens for every score and the level call:
   1. What does this role actually DO day-to-day? Read the
      Responsibilities + Required Skills sections of the JD.
