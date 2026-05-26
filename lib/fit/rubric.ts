@@ -70,28 +70,28 @@ export const DEFAULT_RUBRIC: ScoringRubric = {
         ],
       },
     },
-    // Seniority is now a bell curve around required YOE rather than a
-    // strict "higher title = better" ladder. The candidate has 15+
-    // years; roles asking for 10-12 years are the peak match (target
-    // band, not over-qualified, not stretching). Roles asking for 5
-    // years suggest under-leveling. Roles asking for 15+ are at the
-    // edge — possibly looking for someone too senior, or just listing
-    // an aspirational floor. Title corroborates the band but the YOE
-    // requirement is the more reliable signal when both are present.
+    // Seniority is a bell curve around required YOE — corroborated by
+    // OTE/base bands when present. The candidate has exactly 15 years
+    // of experience and targets $250-400k OTE (base + bonus) or $200k+
+    // base. YOE 10-12 is the peak (target band, no over-/under-leveling).
+    // Comp below $200k base = strong signal of under-leveling regardless
+    // of title; comp at $450k+ base hints at the role being aimed at
+    // a tier above the candidate (CRO/CCO succession). Title is the
+    // tie-breaker, not the driver.
     seniority: {
       weight: 0.15,
       scale: {
         description:
-          "Bell curve around the JD's required YOE. The candidate has 15+ years of experience. Peak fit is roles asking for 10-12 years (target seniority band, no over- or under-leveling). Tapers in both directions: <8 years asked = over-qualified; 15+ years asked = at the edge / possibly seeking SVP-tier the candidate is bordering on. Title is corroborating evidence but the YOE requirement is the primary signal when present. When YOE isn't stated, infer from title.",
+          "Bell curve around the JD's required YOE, corroborated by stated OTE / base salary when listed. The candidate has 15 years of experience and targets $250-400k OTE (base + bonus) or $200k+ base. Peak fit (10) is YOE 10-12 + OTE 280-400k + Director-VP titles. Tapers in both directions: under-leveling (sub-$200k base, <8 YOE asked, Manager / Senior IC titles) drops the score sharply; over-shooting (15+ YOE explicitly + $450k+ base, SVP/CRO/CCO titles) lands around 7 (at the edge / aspirational). When OTE isn't stated, infer from title + company stage. When YOE isn't stated, infer from title. When both are absent, lean on title alone but mark the score with appropriate uncertainty.",
         anchors: [
-          { score: 10, description: "JD asks for 10-12 years experience (peak band) OR title is Director / Senior Director / VP of GTM/Sales/Revenue/Value (target leadership tier). Candidate is exactly target." },
-          { score: 9,  description: "JD asks for 8-10 years OR 12-15 years (one band off the peak). OR title is Head of [function] / SVP of [function] — slightly aspirational but in range." },
-          { score: 8,  description: "JD asks for 6-8 years OR title is Senior Manager / Manager-of-managers — slightly below target band, candidate would be top of the range." },
-          { score: 7,  description: "JD asks for 15+ years explicitly (often paired with VP/SVP/C-suite titles) — candidate is at the edge of qualifying; might be aspirational." },
-          { score: 5,  description: "JD asks for 4-6 years OR title is Manager — candidate clearly over-qualified, but not absurdly so." },
-          { score: 3,  description: "JD asks for 3-5 years OR title is Senior IC + a function (Senior Account Executive, Senior Value Consultant) — candidate over-qualified." },
-          { score: 1,  description: "JD asks for <3 years OR title is Mid-level IC / Associate." },
-          { score: 0,  description: "Entry-level / Analyst / new-grad." },
+          { score: 10, description: "Peak: JD asks 10-12 YOE OR title is Director / Senior Director / VP of GTM/Sales/Revenue/Value (target leadership tier). Stated OTE in $280-400k band OR base $220k+. Exactly target." },
+          { score: 9,  description: "JD asks 8-10 or 12-15 YOE (one band off peak). OR title is Head of [function] / SVP of [function] — slightly aspirational but in range. OTE $250-400k or base $200-250k." },
+          { score: 8,  description: "JD asks 6-8 YOE OR title is Senior Manager / Manager-of-managers / Group Manager — slightly below target band. OTE $220-300k or base $180-220k; candidate would be top of the listed range." },
+          { score: 7,  description: "JD asks 15+ YOE explicitly (often paired with VP/SVP/C-suite/CRO titles) OR stated comp materially above target ($450k+ base, $500k+ OTE) — candidate is at the edge of qualifying; role may be aspirational / aimed at someone with explicit P&L ownership the candidate hasn't held." },
+          { score: 5,  description: "JD asks 4-6 YOE OR title is Manager / Player-coach. OTE $150-220k or base $130-180k — candidate clearly over-qualified on YOE and under-targeted on comp, though not absurdly so." },
+          { score: 3,  description: "JD asks 3-5 YOE OR title is Senior IC + function (Senior Account Executive, Senior Value Consultant, Senior Manager IC). OTE $130-180k or base $110-150k — candidate materially over-qualified." },
+          { score: 1,  description: "JD asks <3 YOE OR title is Mid-level IC / Associate. OTE / base below $130k. Comp band alone disqualifies." },
+          { score: 0,  description: "Entry-level / Analyst / new-grad / no comp listed at a company / role-shape that's clearly an IC funnel-entry." },
         ],
       },
     },

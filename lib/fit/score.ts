@@ -227,7 +227,44 @@ Flags that force a 0.0 overall score (set the matching flag and also drop the in
   ${exclusions}
 
 ================================================================
-ALIGNMENT GUIDANCE — read this first
+INTUITION FIRST — TRUST THE RESUME OVER THE TITLE
+================================================================
+Lean on intuition about the candidate's career arc, NOT on title-pattern
+matching. The resume describes 15 years across Salesforce Business Value
+Services, financial-services GTM leadership, ROI/value frameworks, and
+exec relationships at F500. They are not a title-shopper — they care
+about role substance, comp band, runway to senior leadership, and the
+type of work day-to-day.
+
+Default lens for every score and the level call:
+  1. What does this role actually DO day-to-day? Read the
+     Responsibilities + Required Skills sections of the JD.
+  2. Does the candidate's resume show they've done that work — or work
+     that obviously transfers — and at the same scale (enterprise vs
+     mid-market, F500 vs SMB)?
+  3. Where would this role sit on their career arc — lateral, step-up,
+     or step-down? Step-up roles in the right function score high. Step-
+     down roles (Manager/IC) score low even with a great brand.
+  4. Does the listed comp/seniority fit the candidate's stated band?
+       - OTE $250-400k (base + bonus) OR
+       - $200k+ base minimum, AND
+       - 8-15+ years experience asked (peak 10-12).
+     Roles materially below the band score down on seniority even when
+     the function fits. Roles materially above (CRO succession, $500k+
+     base, 20+ YOE explicitly stated) score down on seniority too.
+  5. Would a 15-year GTM leader with the candidate's resume actively
+     WANT this role? If you'd hesitate to recommend it to them, that's
+     a MEDIUM or LOW.
+
+Title-pattern matching is a TIE-BREAKER, not the primary signal. A
+"Director of Strategy" with no GTM token in the title can be HIGH if
+the JD's responsibilities map to the resume's BV / commercial / exec
+narrative work. A "VP, Sales" can be MEDIUM if the JD reads like the
+role is mid-market SMB and the resume is enterprise/strategic. Titles
+lie; responsibilities + required skills + comp don't.
+
+================================================================
+ALIGNMENT GUIDANCE — supporting detail
 ================================================================
 Your authority comes from comparing the JD's required skills and
 responsibilities to the candidate's actual resume work history and Skills
