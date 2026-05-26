@@ -231,10 +231,57 @@ INTUITION FIRST — TRUST THE RESUME OVER THE TITLE
 ================================================================
 Lean on intuition about the candidate's career arc, NOT on title-pattern
 matching. The resume describes 15 years across Salesforce Business Value
-Services, financial-services GTM leadership, ROI/value frameworks, and
-exec relationships at F500. They are not a title-shopper — they care
-about role substance, comp band, runway to senior leadership, and the
-type of work day-to-day.
+Services, vendor-side GTM leadership selling INTO financial services and
+enterprise SaaS, ROI/value frameworks, and exec relationships at F500.
+They are not a title-shopper — they care about role substance, comp
+band, runway to senior leadership, and the type of work day-to-day.
+
+VENDOR vs BANKER — critical FinServ distinction
+The candidate has spent their career on the VENDOR side selling TO
+banks / asset managers / insurers / exchanges. They have NEVER worked
+AT a bank doing banker work. Score INSIDE-the-bank roles down
+accordingly:
+
+  ROLES THAT ARE NOT A FIT (default LOW even at VP/MD/Director level):
+    - Investment Banking / IB Associate / IB VP / IB Director
+    - Investment Counselor / Wealth Advisor / Private Banker
+    - FX Salesperson / FX Trader / Rates Salesperson / Sales Trader
+    - Commercial Banker / Mortgage Lender / Cash Management Sales
+    - Corporate Banker / Treasury Solutions
+    - Asset Manager Portfolio Manager / Buy-side Analyst
+    - Investment Product Specialist / Investment Product Marketer
+    - Hedge Fund / PE Investor / Deal Team
+    - Underwriter / Credit Analyst / Risk-specific roles
+    - Wealth Communications / Wealth Operations / Wealth Strategy
+    - Trade Structuring / Securities Lending / Prime Brokerage
+    - Capital Markets / DCM / ECM / Syndicate / Levered Finance
+  These titles often carry "VP" or "MD" at banks (especially Citi, JPM,
+  BoA, GS, MS) but represent IC banker work, NOT GTM leadership. The
+  candidate categorically does not have this background and will not
+  pursue these. Score them LOW. Override only when the JD's required
+  skills are an unambiguous match for vendor-side ROI/value/exec-
+  narrative work (rare).
+
+  ROLES THAT ARE A FIT inside a FinServ-branded employer:
+    - Vendor-side GTM at Mastercard / Visa / S&P Global / Nasdaq / LSEG
+      / Broadridge / iCapital / Arcesium / Capital One Software / etc.
+      — these companies SELL data, payments, platforms, or services
+      to other FinServ firms; the GTM roles there map directly to the
+      candidate's vendor experience.
+    - "Sales / Business Development / Strategic Sales / Enterprise Sales"
+      at any FinServ vendor where the buyer is institutional.
+    - "Director / VP / Head of [GTM / Sales / Revenue / Value /
+      Strategy / Operations / Transformation]" at a FinServ VENDOR.
+    - "Partnerships / Alliances" when the partner ecosystem is
+      vendor-to-vendor (e.g. payments rails, data partnerships).
+  These score normally per the rubric — vendor-side GTM at a FinServ
+  brand is exactly the candidate's lane.
+
+  HEURISTIC: if the role lives inside a P&L of a bank's revenue line
+  (trading, IB, wealth, lending, AM), it's banker work → LOW. If the
+  role lives inside the vendor's sales/GTM/value org or a vendor-style
+  function at a FinServ-branded company, it's vendor work → score
+  normally.
 
 Default lens for every score and the level call:
   1. What does this role actually DO day-to-day? Read the
