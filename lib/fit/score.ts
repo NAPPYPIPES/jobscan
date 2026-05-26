@@ -8,9 +8,14 @@ import { extractScoringText, fetchDescription } from "./fetch-description";
 import { DEFAULT_RUBRIC, formatRubricForPrompt, type ScoringRubric } from "./rubric";
 import { getUserProfile, getRawResume } from "@/db/profile";
 import { checkSpend } from "./spendCaps";
-import { decideEscalation, levelFromTier1, type Tier1Result } from "./escalation";
-import { triageRoleWithHaiku } from "./triage";
-import { getScoringCaps } from "@/db/scoring-caps";
+// Tier1Result type stays imported — still used by the pending-BV-
+// verification path (rows that were tier-1-scored under the old 2-tier
+// funnel) and by scoreFitWithClaude's optional tier1 context block.
+// The triage/escalation helpers themselves are no longer called after
+// the 2026-05-25 all-Sonnet migration (see scoreUnscoredEligibleForUser
+// header), but the lib/fit/triage.ts and lib/fit/escalation.ts modules
+// remain on disk for scripts/migrate-rescore.ts.
+import { type Tier1Result } from "./escalation";
 
 // Claude Sonnet 4.6 — Tier-2 deep-scorer. Sees the full JD, the full
 // resume, and Haiku's Tier-1 take. Produces dimension scores + a level
@@ -738,23 +743,24 @@ function parseFitJson(text: string, rubric: ScoringRubric): FitScore | null {
 
 // Two-tier scoring path. Replaces the old single-tier Sonnet-on-every-
 // row approach. For each unscored desc-capable row:
-//   1. Tier-1 (Haiku) triage — cheap; reads title + 600-char snippet +
-//      company description + full resume. Returns score, confidence,
-//      quick_take, is_potential_bv.
-//   2. Escalation decision per the policy in lib/fit/escalation.ts.
-//   3. Tier-2 (Sonnet) deep-score if escalated — uses full JD + Haiku's
-//      take + level_recommendation rules.
-//   4. Persist Tier-1 fields always; Tier-2 fields when escalated.
+//   1. Fetch description.
+//   2. Sonnet deep-score (single tier, no Haiku gate). Persists
+//      fit_score + level + bv flag in one pass.
 //
-// Also handles the pending-BV-verification auto-pickup: rows that
-// flagged BV at Tier-1 but couldn't escalate (Sonnet cap hit) get
-// retroactive Tier-2 once budget allows. Picked up FIRST each tick so
-// the "potential gold" rows don't starve.
+// Single-tier rationale: the 2-tier funnel (Haiku triage → Sonnet on
+// escalation) saved $0.70/month at our volume (cost analysis
+// 2026-05-25), which wasn't worth the calibration loop or the false-
+// negatives at the Haiku gate. With ~465 BV/HIGH/MEDIUM rows/month,
+// all-Sonnet runs ~$5.63/mo — well under the $35/mo score cap.
+//
+// Backwards-compat:
+//   - Existing rows with tier1_score set (from the legacy 2-tier
+//     era) keep that audit data; the new path just doesn't write it.
+//   - pending_bv_verification rows from the legacy era still get
+//     picked up first via the pendingBv pop so they finally resolve.
 //
 // Cap-fallback behavior comes from db/scoring-caps:
-//   - Triage cap hit → keyword classifier (existing level stays).
-//   - Sonnet cap hit, not BV → trust Tier-1 with MEDIUM ceiling.
-//   - Sonnet cap hit, BV → persist as HIGH + pending_bv_verification.
+//   - Sonnet cap hit → skip, retry next tick or next month.
 //   - Total cap hit → hard stop, no more AI calls this tick.
 //
 // Run from /api/cron/score after /api/cron/scan. Budget keeps us
@@ -772,7 +778,6 @@ export async function scoreUnscoredEligibleForUser(
   },
 ): Promise<{
   scored: number;
-  triagedOnly: number;
   pendingBvProcessed: number;
   skipped: number;
   errored: number;
@@ -784,7 +789,6 @@ export async function scoreUnscoredEligibleForUser(
   const start = Date.now();
 
   const db = getDb();
-  const caps = await getScoringCaps(userId);
 
   // Common shape: every queue row carries the global match facts
   // (title, location, etc.) AND the user's per-user state (tier1_*,
@@ -867,7 +871,6 @@ export async function scoreUnscoredEligibleForUser(
   const totalPending = pendingBv.length + freshSorted.length;
 
   let scored = 0;
-  let triagedOnly = 0;
   let pendingBvProcessed = 0;
   let skipped = 0;
   let errored = 0;
@@ -875,7 +878,7 @@ export async function scoreUnscoredEligibleForUser(
   for (const m of work) {
     if (Date.now() - start > timeBudgetMs) {
       console.warn(
-        `[fit] [user ${userId.slice(0, 8)}] time budget exhausted (${timeBudgetMs}ms) — bailing with ${scored + triagedOnly} processed, ${totalPending - (scored + triagedOnly + skipped + errored)} remaining`,
+        `[fit] [user ${userId.slice(0, 8)}] time budget exhausted (${timeBudgetMs}ms) — bailing with ${scored} processed, ${totalPending - (scored + skipped + errored)} remaining`,
       );
       break;
     }
@@ -922,94 +925,33 @@ export async function scoreUnscoredEligibleForUser(
     }
 
     // ──────────────────────────────────────────────────────────
-    // Fresh row path: Tier-1 first, then maybe Tier-2
+    // Fresh row path: direct-to-Sonnet (no Haiku gate)
     // ──────────────────────────────────────────────────────────
-    const triageStatus = await checkSpend(userId, "triage");
-    if (triageStatus.capReached || triageStatus.totalCapReached) {
-      console.warn(
-        `[fit] [user ${userId.slice(0, 8)}] triage cap reached ($${triageStatus.spent.toFixed(2)}/$${triageStatus.cap.toFixed(2)}) — skipping ${m.companySlug}/${m.jobId}`,
-      );
-      skipped++;
-      continue;
-    }
-
-    const rawDesc = await fetchDescription(m.ats, m.companySlug, m.jobId);
-    if (!rawDesc) {
-      skipped++;
-      console.log(`[fit] skip ${m.companySlug}/${m.jobId} — no description`);
-      continue;
-    }
-    const extracted = extractScoringText(rawDesc);
-
-    // Tier-1: Haiku triage against THIS user's resume.
-    const triageOut = await triageRoleWithHaiku({
-      userId,
-      title: m.title,
-      company: m.companyDisplayName,
-      companySlug: m.companySlug,
-      location: m.location,
-      descriptionSnippet: extracted,
-    });
-
-    if (!triageOut.ok) {
-      console.warn(
-        `[fit] [user ${userId.slice(0, 8)}] tier-1 failed for ${m.companySlug}/${m.jobId} (${triageOut.reason}) — skipping`,
-      );
-      errored++;
-      continue;
-    }
-
-    await insertTriageUsage(userId, m.id, triageOut);
-
     const sonnetStatus = await checkSpend(userId, "score");
-    const sonnetCapReached =
-      sonnetStatus.capReached || sonnetStatus.totalCapReached;
-    const decision = decideEscalation(triageOut.tier1, caps, sonnetCapReached);
-
-    if (decision.escalate) {
-      const result = await runTier2OnRow(
-        userId,
-        m,
-        triageOut.tier1,
-        rubric,
-        extracted,
+    if (sonnetStatus.capReached || sonnetStatus.totalCapReached) {
+      console.warn(
+        `[fit] [user ${userId.slice(0, 8)}] score cap reached ($${sonnetStatus.spent.toFixed(2)}/$${sonnetStatus.cap.toFixed(2)}) — skipping ${m.companySlug}/${m.jobId}`,
       );
-      if (result === "ok") {
-        scored++;
-        console.log(
-          `[fit] match=${m.id.slice(0, 8)} user=${userId.slice(0, 8)} haiku={score:${triageOut.tier1.tier1_score.toFixed(1)}, conf:${triageOut.tier1.confidence}, bv:${triageOut.tier1.is_potential_bv}} → escalate (${decision.reason})`,
-        );
-      } else if (result === "skip_no_desc") {
-        skipped++;
-      } else {
-        errored++;
-      }
+      skipped++;
       continue;
     }
 
-    let level: Level;
-    let pendingBv = false;
-    if (decision.reason === "potential_bv_capped") {
-      level = "HIGH";
-      pendingBv = true;
+    const result = await runTier2OnRow(userId, m, undefined, rubric);
+    if (result === "ok") {
+      scored++;
+    } else if (result === "skip_no_desc") {
+      skipped++;
     } else {
-      level = levelFromTier1(triageOut.tier1.tier1_score);
+      errored++;
     }
-
-    await persistTier1Only(userId, m.id, triageOut.tier1, level, pendingBv);
-    triagedOnly++;
-    console.log(
-      `[fit] match=${m.id.slice(0, 8)} user=${userId.slice(0, 8)} haiku={score:${triageOut.tier1.tier1_score.toFixed(1)}, conf:${triageOut.tier1.confidence}, bv:${triageOut.tier1.is_potential_bv}} → no_escalate (${decision.reason}) → level:${level}${pendingBv ? " pending_bv=true" : ""}`,
-    );
   }
 
   return {
     scored,
-    triagedOnly,
     pendingBvProcessed,
     skipped,
     errored,
-    remaining: Math.max(0, totalPending - (scored + triagedOnly + skipped + errored)),
+    remaining: Math.max(0, totalPending - (scored + skipped + errored)),
   };
 }
 
@@ -1038,16 +980,17 @@ type WorkRow = {
 async function runTier2OnRow(
   userId: string,
   m: WorkRow,
-  tier1: Tier1Result,
+  tier1: Tier1Result | undefined,
   rubric: ScoringRubric,
   preFetchedDesc?: string,
 ): Promise<Tier2Outcome> {
   // Write Tier-1 fields up front so they survive even if Tier-2 errors.
   // persistScore will later overwrite level (with level_recommendation),
   // bvReasoning, and pendingBvVerification — but the Tier-1 audit
-  // trail stays intact regardless. Skip for the pending-BV-pickup path
-  // where Tier-1 fields are already on the row.
-  if (m.tier1Score == null) {
+  // trail stays intact regardless. Skip when tier1 is undefined (all-
+  // Sonnet path: no Haiku ran) or when tier1Score is already on the
+  // row (pending-BV-pickup path).
+  if (tier1 && m.tier1Score == null) {
     await writeTier1Fields(userId, m.id, tier1);
   }
 
@@ -1107,10 +1050,12 @@ async function runTier2OnRow(
   }
 }
 
-// Write Tier-1 columns on a user_matches row. Used before escalation
-// so the audit trail lands even if Tier-2 fails. Does NOT touch level
-// — that's controlled by persistTier1Only (no escalation) or
-// persistScore (escalation).
+// Write Tier-1 columns on a user_matches row. Only invoked for rows
+// that came through the legacy 2-tier path — the all-Sonnet path
+// passes undefined for tier1 and skips this entirely. Kept so the
+// pending-BV-verification auto-pickup (which still inherits its
+// Tier-1 result from the DB row) preserves the historical audit
+// trail when Tier-2 runs retroactively.
 async function writeTier1Fields(
   userId: string,
   matchId: string,
@@ -1127,55 +1072,6 @@ async function writeTier1Fields(
       updatedAt: sql`now()`,
     })
     .where(and(eq(userMatches.userId, userId), eq(userMatches.matchId, matchId)));
-}
-
-// Persist Tier-1 results without a Tier-2 score. Updates level + Tier-1
-// columns on user_matches; leaves fit_score NULL.
-async function persistTier1Only(
-  userId: string,
-  matchId: string,
-  tier1: Tier1Result,
-  level: Level,
-  pendingBv: boolean,
-): Promise<void> {
-  const db = getDb();
-  await db
-    .update(userMatches)
-    .set({
-      tier1Score: tier1.tier1_score.toFixed(1),
-      tier1Confidence: tier1.confidence,
-      tier1IsPotentialBv: tier1.is_potential_bv,
-      tier1QuickTake: tier1.quick_take,
-      pendingBvVerification: pendingBv,
-      level,
-      updatedAt: sql`now()`,
-    })
-    .where(and(eq(userMatches.userId, userId), eq(userMatches.matchId, matchId)));
-}
-
-// Insert the triage-purpose api_usage row. Scoped to this user so
-// checkSpend(userId, "triage") returns their accurate monthly sums.
-async function insertTriageUsage(
-  userId: string,
-  matchId: string,
-  out: {
-    tokensIn: number;
-    tokensOut: number;
-    cacheReadTokens: number;
-    cacheWriteTokens: number;
-    costUsd: number;
-  },
-): Promise<void> {
-  const db = getDb();
-  await db.insert(apiUsage).values({
-    userId,
-    matchId,
-    tokensIn: out.tokensIn + out.cacheReadTokens + out.cacheWriteTokens,
-    tokensOut: out.tokensOut,
-    costUsd: out.costUsd.toFixed(6),
-    model: "claude-haiku-4-5-20251001",
-    purpose: "triage",
-  });
 }
 
 // Decides whether a row appears in the daily digest. Wider than just

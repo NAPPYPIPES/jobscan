@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   console.log(`Draining for ${maintEmail} (${userId.slice(0, 8)})...\n`);
 
   const start = Date.now();
-  const totals = { scored: 0, triagedOnly: 0, pendingBvProcessed: 0, skipped: 0, errored: 0 };
+  const totals = { scored: 0, pendingBvProcessed: 0, skipped: 0, errored: 0 };
   let batch = 0;
 
   while (Date.now() - start < TOTAL_BUDGET_MS) {
@@ -34,16 +34,15 @@ async function main(): Promise<void> {
       timeBudgetMs: PER_BATCH_BUDGET_MS,
     });
     totals.scored += result.scored;
-    totals.triagedOnly += result.triagedOnly;
     totals.pendingBvProcessed += result.pendingBvProcessed;
     totals.skipped += result.skipped;
     totals.errored += result.errored;
     console.log(
-      `[batch ${batch}] scored=${result.scored} triaged=${result.triagedOnly} ` +
+      `[batch ${batch}] scored=${result.scored} ` +
       `pending_bv=${result.pendingBvProcessed} skip=${result.skipped} err=${result.errored} ` +
       `remaining=${result.remaining}`,
     );
-    if (result.scored + result.triagedOnly + result.pendingBvProcessed === 0) {
+    if (result.scored + result.pendingBvProcessed === 0) {
       // Nothing processed this batch — either backlog empty, all skipped
       // (no descriptions), or capped. Bail to avoid spin loop.
       console.log("\nNo more progress — stopping.");

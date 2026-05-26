@@ -4,28 +4,24 @@ import { getDb } from "@/db/client";
 import { userExtras } from "@/db/schema";
 import { scoreUnscoredEligibleForUser } from "@/lib/fit/score";
 
-// Decoupled scoring endpoint. Runs the two-tier funnel (Haiku triage
-// then optional Sonnet escalation) on unscored eligible rows per user,
-// plus the pending-BV-verification auto-pickup. Phase 5: now loops
-// every onboarded user with a non-zero monthly cap; each gets a slice
-// of the time budget so one user with a big backlog can't starve
-// others.
+// Decoupled scoring endpoint. Runs Sonnet against unscored eligible
+// rows per user, plus the pending-BV-verification auto-pickup. Phase
+// 5: loops every onboarded user with a non-zero monthly cap; each
+// gets a slice of the time budget so one user with a big backlog
+// can't starve others.
 //
 // Triggered by the same cron workflow as /api/cron/scan, chained as
 // the second curl step. See .github/workflows/cron.yml.
 export const maxDuration = 60;
 
-// Bumped 2026-05-25 again: scan cron moved from hourly to 3-hourly
-// (see .github/workflows/cron.yml), so each fire now needs to drain
-// ~3 hours of accumulated arrivals instead of 1. With ~200 targets
-// and observed ~50 new BV/HIGH/MEDIUM rows/day, a 3-hour bucket is
-// roughly 6-8 fresh rows to score per fire. The cron step calls
-// /score 4 times back-to-back per fire (see workflow), so per-tick
-// capacity = 50 rows × 4 passes = 200 rows per fire. Time budget is
-// still the real ceiling: Sonnet calls average 3-6s, so a tick
-// hitting many Sonnet escalations cuts off around ~15-20 rows
-// regardless of batch limit; the limit just prevents over-querying
-// when most rows resolve at Tier-1.
+// All-Sonnet path (2026-05-25): every eligible row pays for a
+// Sonnet call. Sonnet averages 3-6s per row, so the 55s time budget
+// caps real throughput around 10-18 rows/pass regardless of the
+// batch limit. The batch limit (50) just prevents over-querying the
+// DB when the time budget cuts the work short. The cron workflow
+// runs /score 4× per fire (see .github/workflows/cron.yml), so a
+// single fire processes ~40-70 rows — comfortably above the
+// ~50/week BV+HIGH+MEDIUM add rate that drives this queue.
 const PER_USER_BATCH_LIMIT = 50;
 const TOTAL_TIME_BUDGET_MS = 55_000;
 
@@ -54,7 +50,7 @@ export async function GET(req: Request) {
       );
 
     if (eligible.length === 0) {
-      return NextResponse.json({ users: 0, totals: { scored: 0, triagedOnly: 0, skipped: 0, errored: 0 } });
+      return NextResponse.json({ users: 0, totals: { scored: 0, skipped: 0, errored: 0 } });
     }
 
     // Round-robin the time budget so a user with 500 pending rows
@@ -65,7 +61,6 @@ export async function GET(req: Request) {
 
     const totals = {
       scored: 0,
-      triagedOnly: 0,
       pendingBvProcessed: 0,
       skipped: 0,
       errored: 0,
@@ -79,7 +74,6 @@ export async function GET(req: Request) {
         timeBudgetMs: perUserBudget,
       });
       totals.scored += result.scored;
-      totals.triagedOnly += result.triagedOnly;
       totals.pendingBvProcessed += result.pendingBvProcessed;
       totals.skipped += result.skipped;
       totals.errored += result.errored;

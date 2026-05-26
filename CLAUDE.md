@@ -200,10 +200,13 @@ back to generic vocabulary, no warning needed.
   workflow drops (observed ~7-12 fires/day vs the 8 scheduled), and
   to drain the accumulated 3-hour add-rate in one fire.
 - **DB**: Neon Postgres, Drizzle ORM
-- **AI**: Anthropic SDK — Sonnet 4.6 for Tier-2 fit scoring, Haiku 4.5
-  for Tier-1 triage + resume parsing + pro/con summaries. The two-tier
-  funnel (triage everything, escalate keepers to Sonnet) is in
-  `lib/fit/score.ts`; thresholds are in `scoring_caps`.
+- **AI**: Anthropic SDK — Sonnet 4.6 for fit scoring (single-tier as
+  of 2026-05-25; the prior Haiku → Sonnet funnel was retired after a
+  cost analysis showed the savings were $0.70/mo at our volume),
+  Haiku 4.5 for resume parsing and pro/con summaries. Scoring logic
+  is in `lib/fit/score.ts`; the legacy `lib/fit/triage.ts` and
+  `lib/fit/escalation.ts` modules remain on disk only because
+  `scripts/migrate-rescore.ts` still imports them.
 - **Auth**: NextAuth v5 (Google OAuth + email/password Credentials)
   with the Drizzle adapter, JWT sessions signed by `AUTH_SECRET`, edge
   middleware on every non-cron route
