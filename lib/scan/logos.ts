@@ -58,6 +58,9 @@ export const COMPANY_DOMAINS: Record<string, string> = {
   asana:            "asana.com",
   addepar1:         "addepar.com",
   maintainx:        "getmaintainx.com",
+  // Airtable (Greenhouse) + Cloudera (Workday) batch
+  airtable:         "airtable.com",
+  cloudera:         "cloudera.com",
 };
 
 // Google's favicon service. Reliable, no API key, returns the brand
