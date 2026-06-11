@@ -195,16 +195,31 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
     return matches.filter((m) => m.firstSeen.getTime() >= cutoff);
   }, [matches, mode, since, hideStale]);
 
-  // How many roles the stale toggle hides (or would hide). Computed
-  // against the full set so the count on the chip stays stable while
-  // the toggle is on.
+  // How many roles the stale toggle hides (or would hide) from the
+  // CURRENT view — it applies the same level/sector/company/search
+  // filters as the main pipeline, so narrowing to e.g. BV+HIGH in
+  // Tech shrinks this count live. Computed from the raw matches array
+  // (not `visible`) because when the toggle is on the stale rows have
+  // already been filtered out of the pipeline, and the chip should
+  // keep showing how many are being hidden.
   const staleCount = useMemo(() => {
     if (mode !== "all") return 0;
     const staleCutoff = Date.now() - STALE_MS;
+    const q = searchQuery.trim().toLowerCase();
     let n = 0;
-    for (const m of matches) if (m.firstSeen.getTime() < staleCutoff) n++;
+    for (const m of matches) {
+      if (m.firstSeen.getTime() >= staleCutoff) continue;
+      if (!selectedSectors.has(sectorForSlug(m.companySlug))) continue;
+      if (companyParam && m.companySlug !== companyParam) continue;
+      if (q && !m.companyDisplayName.toLowerCase().includes(q)) continue;
+      if (!selectedLevels.has(m.level)) continue;
+      n++;
+    }
     return n;
-  }, [matches, mode]);
+    // sectorForSlug is a stable lookup over the sectorBySlug prop —
+    // recreated per render but pure, so it's safe to omit from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches, mode, selectedSectors, companyParam, searchQuery, selectedLevels]);
 
   const sinceCounts: Record<Since, number> = useMemo(() => {
     if (mode === "all") return { "24h": 0, "48h": 0, "72h": 0 };
