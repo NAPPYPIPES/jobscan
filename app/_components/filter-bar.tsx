@@ -15,12 +15,14 @@ export type Since = "24h" | "48h" | "72h";
 // alpha + level were dropped in the "best practice defaults" reset:
 //   alpha is reachable via the company search box; level is strictly
 //   redundant with score (level is just bucketed fit_score).
-export const ALL_SORTS = ["score", "activity"] as const;
+export const ALL_SORTS = ["activity", "score"] as const;
 export type Sort = (typeof ALL_SORTS)[number];
 
+// Button order mirrors precedence: the default ("By company") sits in
+// the first position, "Best fit" second.
 const SORT_OPTIONS: { value: Sort; label: string; title: string }[] = [
-  { value: "score", label: "Best fit", title: "Highest fit_score first (flat list)" },
   { value: "activity", label: "By company", title: "Group by company, most-active first" },
+  { value: "score", label: "Best fit", title: "Highest fit_score first (flat list)" },
 ];
 
 const LEVELS: Level[] = ["BV", "HIGH", "MEDIUM", "LOW"];
@@ -76,6 +78,28 @@ function Checkbox({ active }: { active: boolean }) {
   );
 }
 
+// Hover tooltip on a small "i" badge. CSS-only (group-hover) so it
+// works without any positioning library; cursor-help + the badge make
+// it discoverable.
+function InfoTip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="group/tip relative inline-flex">
+      <span
+        aria-hidden
+        className="flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-line-strong font-serif text-[10px] font-semibold italic text-fg-subtle transition-colors group-hover/tip:border-fg group-hover/tip:text-fg"
+      >
+        i
+      </span>
+      <span
+        role="tooltip"
+        className="pointer-events-none invisible absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 rounded-md border border-line bg-surface p-3 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-fg-muted opacity-0 shadow-card transition-opacity group-hover/tip:visible group-hover/tip:opacity-100"
+      >
+        {children}
+      </span>
+    </span>
+  );
+}
+
 type Props = {
   selectedLevels: Set<Level>;
   onToggleLevel: (level: Level) => void;
@@ -96,6 +120,12 @@ type Props = {
   onSelectCompany: (slug: string) => void;
   sort: Sort;
   onChangeSort: (s: Sort) => void;
+  // Stale-jobs toggle (All Open only — the Recent window is ≤72h so
+  // nothing there can be stale). Absent handler hides the control.
+  hideStale?: boolean;
+  onToggleHideStale?: () => void;
+  staleCount?: number;
+  staleDays?: number;
   totalShown: number;
   totalAvailable: number;
 };
@@ -143,6 +173,10 @@ export default function FilterBar({
   onSelectCompany,
   sort,
   onChangeSort,
+  hideStale,
+  onToggleHideStale,
+  staleCount,
+  staleDays,
   totalShown,
   totalAvailable,
 }: Props) {
@@ -256,6 +290,37 @@ export default function FilterBar({
             );
           })}
         </div>
+
+        {onToggleHideStale && (
+          <>
+            <button
+              type="button"
+              onClick={onToggleHideStale}
+              className={`${CHIP_BASE} ${hideStale ? "bg-fg text-canvas ring-fg" : CHIP_OFF}`}
+            >
+              <Checkbox active={hideStale ?? false} />
+              <span>Remove stale jobs</span>
+              {staleCount !== undefined && (
+                <span
+                  className={`font-mono tabular-nums ${
+                    hideStale ? "text-canvas/70" : "text-fg-subtle"
+                  }`}
+                >
+                  {staleCount}
+                </span>
+              )}
+            </button>
+            <InfoTip>
+              <strong className="font-semibold text-fg">Stale jobs</strong>{" "}
+              are roles the scanner first saw more than{" "}
+              {staleDays ?? 30} days ago and that are still open.
+              Long-open postings are often evergreen requisitions or
+              ghost listings that were filled but never taken down.
+              Checking this removes them from the list — the count
+              shows how many would be hidden.
+            </InfoTip>
+          </>
+        )}
       </div>
 
       <p className="text-xs text-fg-muted">

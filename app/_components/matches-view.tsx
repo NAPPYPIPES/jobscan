@@ -26,6 +26,13 @@ const DEFAULT_LEVELS: Level[] = ["BV", "HIGH", "MEDIUM"];
 const ALL_SECTORS: Sector[] = ["tech", "finserv", "other"];
 const SINCE_HOURS: Record<Since, number> = { "24h": 24, "48h": 48, "72h": 72 };
 
+// A role is "stale" when the scanner first saw it more than this many
+// days ago and it's still open — long-open postings are often
+// evergreen reqs or ghost listings. Only meaningful on All Open (the
+// Recent window is ≤72h), so the toggle is hidden in recent mode.
+const STALE_DAYS = 30;
+const STALE_MS = STALE_DAYS * 24 * 3_600_000;
+
 // Synthetic fit score for sorting unscored rows (Workday roles, LOW
 // roles). Mapped from level so they slot reasonably amongst real
 // scores rather than dead-last. Display never shows these — only the
@@ -98,6 +105,7 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
   }, [matches, companyParam]);
 
   const searchQuery = params.get("q") ?? "";
+  const hideStale = mode === "all" && params.get("hideStale") === "1";
 
   // Shallow URL update (Next 14.1+ syncs useSearchParams from the
   // History API). All filtering happens client-side over the already-
@@ -144,6 +152,10 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
     setParam("sort", s === "activity" ? null : s);
   };
 
+  const onToggleHideStale = () => {
+    setParam("hideStale", hideStale ? null : "1");
+  };
+
   const onChangeSince = (s: Since) => {
     setParam("since", s === "24h" ? null : s);
   };
@@ -174,10 +186,25 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
   };
 
   const inWindow = useMemo(() => {
-    if (mode === "all") return matches;
+    if (mode === "all") {
+      if (!hideStale) return matches;
+      const staleCutoff = Date.now() - STALE_MS;
+      return matches.filter((m) => m.firstSeen.getTime() >= staleCutoff);
+    }
     const cutoff = Date.now() - SINCE_HOURS[since] * 3_600_000;
     return matches.filter((m) => m.firstSeen.getTime() >= cutoff);
-  }, [matches, mode, since]);
+  }, [matches, mode, since, hideStale]);
+
+  // How many roles the stale toggle hides (or would hide). Computed
+  // against the full set so the count on the chip stays stable while
+  // the toggle is on.
+  const staleCount = useMemo(() => {
+    if (mode !== "all") return 0;
+    const staleCutoff = Date.now() - STALE_MS;
+    let n = 0;
+    for (const m of matches) if (m.firstSeen.getTime() < staleCutoff) n++;
+    return n;
+  }, [matches, mode]);
 
   const sinceCounts: Record<Since, number> = useMemo(() => {
     if (mode === "all") return { "24h": 0, "48h": 0, "72h": 0 };
@@ -347,6 +374,10 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
         onSelectCompany={onSelectCompany}
         sort={sort}
         onChangeSort={onChangeSort}
+        hideStale={mode === "all" ? hideStale : undefined}
+        onToggleHideStale={mode === "all" ? onToggleHideStale : undefined}
+        staleCount={mode === "all" ? staleCount : undefined}
+        staleDays={STALE_DAYS}
         totalShown={visible.length}
         totalAvailable={inSearch.length}
       />
