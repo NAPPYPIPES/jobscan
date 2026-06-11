@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import type { Level, Sector } from "@/lib/scan/types";
 import type { Role } from "@/lib/auth/viewer";
 import FilterBar, { type Since, type Sort, ALL_SORTS } from "./filter-bar";
@@ -55,7 +55,6 @@ type Props = {
 };
 
 export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }: Props) {
-  const router = useRouter();
   const params = useSearchParams();
   const sectorForSlug = makeSectorLookup(sectorBySlug);
 
@@ -79,7 +78,7 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
 
   const sort: Sort = (() => {
     const v = params.get("sort");
-    return ALL_SORTS.includes(v as Sort) ? (v as Sort) : "score";
+    return ALL_SORTS.includes(v as Sort) ? (v as Sort) : "activity";
   })();
 
   const sectorsParam = params.get("sectors");
@@ -100,12 +99,21 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
 
   const searchQuery = params.get("q") ?? "";
 
+  // Shallow URL update (Next 14.1+ syncs useSearchParams from the
+  // History API). All filtering happens client-side over the already-
+  // fetched matches prop, so a router.replace here would only trigger
+  // a pointless server re-render of this force-dynamic page on every
+  // chip click.
+  const replaceQuery = (next: URLSearchParams) => {
+    const qs = next.toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  };
+
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params.toString());
     if (value === null) next.delete(key);
     else next.set(key, value);
-    const qs = next.toString();
-    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+    replaceQuery(next);
   };
 
   const onToggleLevel = (level: Level) => {
@@ -133,7 +141,7 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
   };
 
   const onChangeSort = (s: Sort) => {
-    setParam("sort", s === "score" ? null : s);
+    setParam("sort", s === "activity" ? null : s);
   };
 
   const onChangeSince = (s: Since) => {
@@ -162,8 +170,7 @@ export default function MatchesView({ matches, mode, sectorBySlug, viewerRole }:
     const next = new URLSearchParams(params.toString());
     next.set("company", slug);
     next.delete("q");
-    const qs = next.toString();
-    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+    replaceQuery(next);
   };
 
   const inWindow = useMemo(() => {

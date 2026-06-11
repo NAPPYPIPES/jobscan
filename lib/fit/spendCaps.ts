@@ -53,51 +53,73 @@ function monthUtcStart(): Date {
   return d;
 }
 
-// Per-user MTD spend lookup. One query, two sums (purpose-specific +
-// total). The cap derivation reads user_extras.monthly_cap_usd; if
-// the row is missing (shouldn't happen post-onboarding), default to
-// $0 so every call short-circuits — safer than picking a magic
-// number that might burn unexpected spend.
+// Per-user MTD spend lookup for any number of purposes at once. Two
+// Neon round trips total (run in parallel): one MTD aggregate grouped
+// by purpose, one user_extras cap read. The cap derivation reads
+// user_extras.monthly_cap_usd; if the row is missing (shouldn't
+// happen post-onboarding), default to $0 so every call
+// short-circuits — safer than picking a magic number that might burn
+// unexpected spend.
+export async function checkSpends<P extends Purpose>(
+  userId: string,
+  purposes: readonly P[],
+): Promise<Record<P, SpendStatus>> {
+  const db = getDb();
+  const start = monthUtcStart();
+
+  const [sumRows, capRows] = await Promise.all([
+    db
+      .select({
+        purpose: apiUsage.purpose,
+        spent: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text`,
+      })
+      .from(apiUsage)
+      .where(and(eq(apiUsage.userId, userId), gte(apiUsage.calledAt, start)))
+      .groupBy(apiUsage.purpose),
+    db
+      .select({ cap: userExtras.monthlyCapUsd })
+      .from(userExtras)
+      .where(eq(userExtras.userId, userId))
+      .limit(1),
+  ]);
+
+  const spentByPurpose = new Map<string, number>();
+  let totalSpent = 0;
+  for (const r of sumRows) {
+    const v = parseFloat(r.spent);
+    spentByPurpose.set(r.purpose, v);
+    totalSpent += v;
+  }
+  const totalCap = parseFloat(capRows[0]?.cap ?? "0");
+
+  const out = {} as Record<P, SpendStatus>;
+  for (const purpose of purposes) {
+    // resume_parse + company_description fall back to Infinity so they
+    // only feel the total-cap pressure, not a per-purpose ceiling.
+    const fraction = APPORTION[purpose as keyof typeof APPORTION];
+    const cap =
+      fraction == null ? Number.POSITIVE_INFINITY : totalCap * fraction;
+    const spent = spentByPurpose.get(purpose) ?? 0;
+    out[purpose] = {
+      purpose,
+      spent,
+      cap,
+      capReached: spent >= cap,
+      totalSpent,
+      totalCap,
+      totalCapReached: totalSpent >= totalCap,
+    };
+  }
+  return out;
+}
+
+// Single-purpose convenience wrapper around checkSpends.
 export async function checkSpend(
   userId: string,
   purpose: Purpose,
 ): Promise<SpendStatus> {
-  const db = getDb();
-  const start = monthUtcStart();
-
-  const sumRows = await db
-    .select({
-      purposeSpent: sql<string>`coalesce(sum(case when ${apiUsage.purpose} = ${purpose} then ${apiUsage.costUsd} else 0 end), 0)::text`,
-      totalSpent: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text`,
-    })
-    .from(apiUsage)
-    .where(and(eq(apiUsage.userId, userId), gte(apiUsage.calledAt, start)));
-
-  const spent = parseFloat(sumRows[0]?.purposeSpent ?? "0");
-  const totalSpent = parseFloat(sumRows[0]?.totalSpent ?? "0");
-
-  const capRows = await db
-    .select({ cap: userExtras.monthlyCapUsd })
-    .from(userExtras)
-    .where(eq(userExtras.userId, userId))
-    .limit(1);
-  const totalCap = parseFloat(capRows[0]?.cap ?? "0");
-
-  // resume_parse + company_description fall back to Infinity so they
-  // only feel the total-cap pressure, not a per-purpose ceiling.
-  const fraction = APPORTION[purpose as keyof typeof APPORTION];
-  const cap =
-    fraction == null ? Number.POSITIVE_INFINITY : totalCap * fraction;
-
-  return {
-    purpose,
-    spent,
-    cap,
-    capReached: spent >= cap,
-    totalSpent,
-    totalCap,
-    totalCapReached: totalSpent >= totalCap,
-  };
+  const statuses = await checkSpends(userId, [purpose]);
+  return statuses[purpose];
 }
 
 // Convenience for the auto-pickup path: is Sonnet (score purpose)

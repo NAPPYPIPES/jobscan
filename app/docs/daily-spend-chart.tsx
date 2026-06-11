@@ -32,6 +32,7 @@ const DEFAULT_RANGE: Record<Granularity, number> = { day: 14, week: 8 };
 export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
   const [granularity, setGranularity] = useState<Granularity>("day");
   const [units, setUnits] = useState<number>(DEFAULT_RANGE.day);
+  const [excludeOutliers, setExcludeOutliers] = useState(false);
 
   const padded = useMemo(
     () =>
@@ -41,9 +42,19 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
     [data, granularity, units],
   );
 
-  const total = padded.reduce((sum, d) => sum + d.spendUsd, 0);
-  const avg = padded.length > 0 ? total / padded.length : 0;
-  const maxSpend = Math.max(...padded.map((d) => d.spendUsd), 0);
+  // Tukey fence (Q3 + 1.5×IQR) over the non-zero buckets — zero days
+  // are padding/idle, and including them would drag the quartiles to
+  // 0 and flag every normal day. Infinity = nothing excluded.
+  const outlierCutoff = useMemo(() => {
+    if (!excludeOutliers) return Number.POSITIVE_INFINITY;
+    return tukeyUpperFence(padded.map((d) => d.spendUsd));
+  }, [padded, excludeOutliers]);
+
+  const kept = padded.filter((d) => d.spendUsd <= outlierCutoff);
+  const outlierCount = padded.length - kept.length;
+  const total = kept.reduce((sum, d) => sum + d.spendUsd, 0);
+  const avg = kept.length > 0 ? total / kept.length : 0;
+  const maxSpend = Math.max(...kept.map((d) => d.spendUsd), 0);
   const yMax = niceUpper(maxSpend);
   // Position the avg line as % from the TOP of the chart (0 = top, 100 = bottom).
   // Clamp so the line doesn't sit exactly on the baseline (where it'd be
@@ -71,6 +82,14 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
               ${avg.toFixed(2)}
             </span>{" "}
             / {granularity === "day" ? "day" : "week"}
+            {excludeOutliers && outlierCount > 0 && (
+              <>
+                <span className="mx-1.5 text-fg-faint">·</span>
+                <span className="text-amber-700 dark:text-amber-400">
+                  {outlierCount} outlier{outlierCount === 1 ? "" : "s"} excluded
+                </span>
+              </>
+            )}
           </p>
         </div>
         <div className="flex gap-2">
@@ -109,24 +128,45 @@ export function DailySpendChart({ data }: { data: DailySpendRow[] }) {
               </button>
             ))}
           </div>
+          <label
+            className="flex cursor-pointer select-none items-center gap-1.5 rounded-md border border-line bg-muted px-2 py-0.5 text-[11px] font-medium text-fg-subtle transition-colors hover:text-fg"
+            title="Hide spend spikes (above Q3 + 1.5×IQR of non-zero buckets) from the chart scale and totals"
+          >
+            <input
+              type="checkbox"
+              checked={excludeOutliers}
+              onChange={(e) => setExcludeOutliers(e.target.checked)}
+              className="h-3 w-3 accent-emerald-600"
+            />
+            Remove outliers
+          </label>
         </div>
       </div>
 
       <div className="relative">
         <div className="relative flex h-32 items-end gap-[1px] border-b border-l border-line pl-2 pr-1 pt-1">
           {padded.map((d) => {
-            const heightPct = yMax === 0 ? 0 : (d.spendUsd / yMax) * 100;
+            const isOutlier = d.spendUsd > outlierCutoff;
+            // Outliers stay visible but clip at the (rescaled) top in
+            // amber, so the spike's existence isn't hidden — only its
+            // distortion of the y-axis.
+            const heightPct =
+              yMax === 0 ? 0 : (Math.min(d.spendUsd, yMax) / yMax) * 100;
             return (
               <div
                 key={d.date}
                 className="group relative flex h-full flex-1 items-end"
-                title={`${labelForBar(d.date, granularity)} — $${d.spendUsd.toFixed(4)}`}
+                title={`${labelForBar(d.date, granularity)} — $${d.spendUsd.toFixed(4)}${
+                  isOutlier ? " (outlier, clipped)" : ""
+                }`}
               >
                 <div
                   className={`w-full rounded-sm transition-colors ${
-                    d.spendUsd > 0
-                      ? "bg-emerald-500 group-hover:bg-emerald-600 dark:bg-emerald-400 dark:group-hover:bg-emerald-300"
-                      : "bg-muted group-hover:bg-line"
+                    isOutlier
+                      ? "bg-amber-400 group-hover:bg-amber-500 dark:bg-amber-500 dark:group-hover:bg-amber-400"
+                      : d.spendUsd > 0
+                        ? "bg-emerald-500 group-hover:bg-emerald-600 dark:bg-emerald-400 dark:group-hover:bg-emerald-300"
+                        : "bg-muted group-hover:bg-line"
                   }`}
                   style={{ height: `${Math.max(heightPct, d.spendUsd > 0 ? 2 : 1)}%` }}
                 />
@@ -200,6 +240,25 @@ function buildWeeklyRange(data: DailySpendRow[], weeks: number): DailySpendRow[]
     out.push({ date: weekStart.toISOString().slice(0, 10), spendUsd: sum });
   }
   return out;
+}
+
+// Upper Tukey fence (Q3 + 1.5×IQR) over the non-zero values, with
+// linear-interpolated quartiles. Returns Infinity when there are too
+// few points to call anything an outlier (< 4 non-zero buckets) or
+// when nothing actually exceeds the fence.
+function tukeyUpperFence(values: number[]): number {
+  const nonzero = values.filter((v) => v > 0).sort((a, b) => a - b);
+  if (nonzero.length < 4) return Number.POSITIVE_INFINITY;
+  const quantile = (p: number) => {
+    const idx = (nonzero.length - 1) * p;
+    const lo = Math.floor(idx);
+    const hi = Math.ceil(idx);
+    return nonzero[lo] + (nonzero[hi] - nonzero[lo]) * (idx - lo);
+  };
+  const q1 = quantile(0.25);
+  const q3 = quantile(0.75);
+  const fence = q3 + 1.5 * (q3 - q1);
+  return nonzero.some((v) => v > fence) ? fence : Number.POSITIVE_INFINITY;
 }
 
 function niceUpper(max: number): number {

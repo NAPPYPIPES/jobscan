@@ -6,12 +6,12 @@ import CompanySearch, { type CompanyOption } from "./company-search";
 export type Since = "24h" | "48h" | "72h";
 
 // Sort modes.
-//   score    — flat list, best fit_score first (default — primary view
-//              for "what should I look at?"). Unscored rows fall back
-//              to a level-derived synthetic score in MatchesView so
-//              they don't trail dead-last.
-//   activity — group by company, most-roles-first (alternative for
-//              browsing a target's full board).
+//   activity — group by company, most-roles-first (default — primary
+//              view for browsing the boards).
+//   score    — flat list, best fit_score first ("what should I look
+//              at?"). Unscored rows fall back to a level-derived
+//              synthetic score in MatchesView so they don't trail
+//              dead-last.
 // alpha + level were dropped in the "best practice defaults" reset:
 //   alpha is reachable via the company search box; level is strictly
 //   redundant with score (level is just bucketed fit_score).

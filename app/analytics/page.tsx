@@ -49,353 +49,122 @@ export default async function Analytics() {
   const since48hSql = sql`now() - interval '48 hours'`;
   const since24hSql = sql`now() - interval '24 hours'`;
 
-  const byLevelWindowRows = await db
-    .select({
-      level: userMatches.level,
-      h24: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since24hSql})::int`,
-      h48: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since48hSql})::int`,
-      h72: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since72hSql})::int`,
-    })
-    .from(userMatches)
-    .innerJoin(matches, eq(matches.id, userMatches.matchId))
-    .where(
-      and(
-        eq(userMatches.userId, userId),
-        gte(matches.firstSeen, since72hSql),
-        ne(userMatches.status, "dismissed"),
-        eq(userMatches.isBaseline, false),
-        isNull(matches.closedAt),
-      ),
-    )
-    .groupBy(userMatches.level);
-  const newRolesByLevel: NewRolesByLevel = {
-    BV: { h24: 0, h48: 0, h72: 0 },
-    HIGH: { h24: 0, h48: 0, h72: 0 },
-    MEDIUM: { h24: 0, h48: 0, h72: 0 },
-    LOW: { h24: 0, h48: 0, h72: 0 },
-  };
-  for (const r of byLevelWindowRows) {
-    newRolesByLevel[r.level as Level] = { h24: r.h24, h48: r.h48, h72: r.h72 };
-  }
-
-  // Fit band query — 24h slice, bucket by fit_score. Per-user via
-  // join. Drizzle's raw sql template lets us keep the CASE-based
-  // bucketing as a single statement.
-  const byFitBandRows = await db.execute(
-    sql`SELECT
-      CASE
-        WHEN um.fit_score IS NULL THEN 'unscored'
-        WHEN um.fit_score >= 8.0 THEN 'high'
-        WHEN um.fit_score >= 6.0 THEN 'good'
-        ELSE 'low'
-      END AS band,
-      count(*)::int AS count
-    FROM user_matches um
-    JOIN matches m ON m.id = um.match_id
-    WHERE um.user_id = ${userId}
-      AND m.first_seen >= now() - interval '24 hours'
-      AND um.status != 'dismissed'
-      AND um.is_baseline = false
-      AND m.closed_at IS NULL
-    GROUP BY band`,
-  );
-  const newRolesByFit: NewRolesByFitBand = {
-    high: 0,
-    good: 0,
-    low: 0,
-    unscored: 0,
-  };
-  for (const r of byFitBandRows.rows as { band: string; count: number }[]) {
-    if (r.band === "high" || r.band === "good" || r.band === "low" || r.band === "unscored") {
-      newRolesByFit[r.band] = r.count;
-    }
-  }
-
-  const byCompanyWindowRows = await db
-    .select({
-      slug: matches.companySlug,
-      name: matches.companyDisplayName,
-      h24: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since24hSql})::int`,
-      h48: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since48hSql})::int`,
-      h72: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since72hSql})::int`,
-    })
-    .from(userMatches)
-    .innerJoin(matches, eq(matches.id, userMatches.matchId))
-    .where(
-      and(
-        eq(userMatches.userId, userId),
-        gte(matches.firstSeen, since72hSql),
-        ne(userMatches.status, "dismissed"),
-        eq(userMatches.isBaseline, false),
-        isNull(matches.closedAt),
-      ),
-    )
-    .groupBy(matches.companySlug, matches.companyDisplayName);
-  const newRolesByCompany: NewRolesByCompany[] = byCompanyWindowRows.map((r) => ({
-    slug: r.slug,
-    name: r.name,
-    h24: r.h24,
-    h48: r.h48,
-    h72: r.h72,
-  }));
-
-  // ─── Top 10 companies by open roles ─────────────────────────────────
-  const perSlugLevel = await db
-    .select({
-      slug: matches.companySlug,
-      name: matches.companyDisplayName,
-      level: userMatches.level,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(userMatches)
-    .innerJoin(matches, eq(matches.id, userMatches.matchId))
-    .where(
-      and(
-        eq(userMatches.userId, userId),
-        ne(userMatches.status, "dismissed"),
-        eq(userMatches.isBaseline, false),
-        isNull(matches.closedAt),
-      ),
-    )
-    .groupBy(matches.companySlug, matches.companyDisplayName, userMatches.level);
-  const companyMap = new Map<string, CompanyData>();
-  for (const r of perSlugLevel) {
-    let entry = companyMap.get(r.slug);
-    if (!entry) {
-      entry = {
-        slug: r.slug,
-        name: r.name,
-        byLevel: { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 },
-      };
-      companyMap.set(r.slug, entry);
-    }
-    entry.byLevel[r.level as Level] = r.count;
-  }
-  const companies = Array.from(companyMap.values());
-
-  // ─── Closed roles + per-target scan failures ───────────────────────
-  // Closed rows are global — when matches.closed_at is set, the job
-  // is gone for everyone. But we still want to scope the closed
-  // count to roles the viewer was watching (joined via user_matches).
-  const closedTotalRow = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(userMatches)
-    .innerJoin(matches, eq(matches.id, userMatches.matchId))
-    .where(
-      and(
-        eq(userMatches.userId, userId),
-        ne(userMatches.status, "dismissed"),
-        isNotNull(matches.closedAt),
-      ),
-    );
-  const closedTotal = closedTotalRow[0]?.count ?? 0;
-
-  const closedRows = await db
-    .select({
-      // Re-project to the shape Match expects so ClosedRoles' CompactRow
-      // can render. Per-user state pulled from user_matches.
-      id: matches.id,
-      ats: matches.ats,
-      companySlug: matches.companySlug,
-      companyDisplayName: matches.companyDisplayName,
-      jobId: matches.jobId,
-      title: matches.title,
-      location: matches.location,
-      firstSeen: matches.firstSeen,
-      lastSeen: matches.lastSeen,
-      closedAt: matches.closedAt,
-      createdAt: matches.createdAt,
-      level: userMatches.level,
-      status: userMatches.status,
-      isBaseline: userMatches.isBaseline,
-      appliedAt: userMatches.appliedAt,
-      dismissedAt: userMatches.dismissedAt,
-      dismissReason: userMatches.dismissReason,
-      fitScore: userMatches.fitScore,
-      fitSummary: userMatches.fitSummary,
-      fitFlag: userMatches.fitFlag,
-      tier1Score: userMatches.tier1Score,
-      tier1Confidence: userMatches.tier1Confidence,
-      tier1IsPotentialBv: userMatches.tier1IsPotentialBv,
-      tier1QuickTake: userMatches.tier1QuickTake,
-      pendingBvVerification: userMatches.pendingBvVerification,
-      bvReasoning: userMatches.bvReasoning,
-      updatedAt: userMatches.updatedAt,
-    })
-    .from(userMatches)
-    .innerJoin(matches, eq(matches.id, userMatches.matchId))
-    .where(
-      and(
-        eq(userMatches.userId, userId),
-        ne(userMatches.status, "dismissed"),
-        isNotNull(matches.closedAt),
-      ),
-    )
-    .orderBy(desc(matches.closedAt))
-    .limit(25);
-  const closedWithUrls: ClosedRow[] = await Promise.all(
-    closedRows.map(async (m) => ({
-      m: m as ClosedRow["m"],
-      applyUrl: await jobUrl(m.ats, m.companySlug, m.jobId),
-    })),
-  );
-
-  // Failing-scan detection: a target is flagged if its
-  // last_success_at is meaningfully older than the most recent
-  // successful scan across all targets. Scoped to the viewer's
-  // user_targets so demo sees only their curated set.
-  const latestSuccessRow = await db
-    .select({ ts: sql<string | null>`max(${targets.lastSuccessAt})` })
-    .from(targets);
-  const latestSuccessIso = latestSuccessRow[0]?.ts ?? null;
-
+  // Every aggregate below is independent of the others, and on Neon
+  // each query is its own HTTP round trip (~30-50ms). Awaiting them
+  // in series cost ~300-500ms of pure serial latency, so they run as
+  // one parallel batch; post-processing follows once all are back.
   const scanCutoffSql = sql`(SELECT max(${targets.lastSuccessAt}) FROM ${targets}) - interval '${sql.raw(
     String(SCAN_STALE_THRESHOLD_MINUTES),
   )} minutes'`;
-  const failingRows = await db.execute(sql`
-    SELECT t.slug, t.display_name, t.ats, t.last_success_at
-    FROM targets t
-    JOIN user_targets ut ON ut.target_slug = t.slug AND ut.user_id = ${userId}
-    WHERE t.last_success_at IS NULL
-       OR t.last_success_at < ${scanCutoffSql}
-    ORDER BY t.last_success_at ASC NULLS FIRST
-  `);
-  const failingTargets: FailingTarget[] = (
-    failingRows.rows as Array<{
-      slug: string;
-      display_name: string;
-      ats: string;
-      last_success_at: string | null;
-    }>
-  ).map((r) => ({
-    slug: r.slug,
-    displayName: r.display_name,
-    ats: r.ats as FailingTarget["ats"],
-    lastSuccessIso: r.last_success_at ? new Date(r.last_success_at).toISOString() : null,
-  }));
 
-  // ─── New jobs per day (scoped to the viewer's watchlist) ──────────
-  // Pull matches.first_seen counts per UTC day for the last 90 days,
-  // grouped by level so the chart can stack BV/HIGH/MEDIUM/LOW. Joined
-  // through user_matches → the user's targets. Excludes baseline imports
-  // (those are intentional bulk adds, not net-new discoveries). The
-  // chart pads missing days/levels client-side.
-  const dailyNewJobsRows = await db.execute(sql`
-    SELECT
-      to_char(date_trunc('day', m.first_seen at time zone 'UTC'), 'YYYY-MM-DD') AS date,
-      um.level AS level,
-      count(*)::int AS count
-    FROM user_matches um
-    JOIN matches m ON m.id = um.match_id
-    WHERE um.user_id = ${userId}
-      AND um.is_baseline = false
-      AND m.first_seen >= now() - interval '90 days'
-    GROUP BY date_trunc('day', m.first_seen at time zone 'UTC'), um.level
-    ORDER BY date_trunc('day', m.first_seen at time zone 'UTC')
-  `);
-  const dailyJobsMap = new Map<string, Record<Level, number>>();
-  for (const r of dailyNewJobsRows.rows as {
-    date: string;
-    level: string;
-    count: number;
-  }[]) {
-    let entry = dailyJobsMap.get(r.date);
-    if (!entry) {
-      entry = { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
-      dailyJobsMap.set(r.date, entry);
-    }
-    entry[r.level as Level] = r.count;
-  }
-  const dailyNewJobs: DailyNewJobsRow[] = Array.from(dailyJobsMap.entries()).map(
-    ([date, counts]) => ({ date, counts }),
-  );
-
-  // ─── Personal-data sections (skipped entirely in demo mode) ───────
-  // Dismissal patterns + API spend reveal the viewer's actual
-  // job-search activity. Skip the queries in demo to save round
-  // trips. (Demo user has nothing to reveal anyway.)
-  let dailySpend: DailySpendRow[] = [];
-  let dismissByReason: Record<string, number> = {};
-  let noTagCount = 0;
-  let topDismissedCompanies: { company: string; count: number }[] = [];
-  let topDismissedTitles: { title: string; count: number }[] = [];
-  let recentWithUrls: { m: Match; url: string }[] = [];
-
-  if (!isDemo) {
-    const dailySpendRows = await db
+  const [
+    byLevelWindowRows,
+    byFitBandRows,
+    byCompanyWindowRows,
+    perSlugLevel,
+    closedTotalRow,
+    closedRows,
+    latestSuccessRow,
+    failingRows,
+    dailyNewJobsRows,
+  ] = await Promise.all([
+    db
       .select({
-        date: sql<string>`to_char(date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC'), 'YYYY-MM-DD')`,
-        total: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text`,
+        level: userMatches.level,
+        h24: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since24hSql})::int`,
+        h48: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since48hSql})::int`,
+        h72: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since72hSql})::int`,
       })
-      .from(apiUsage)
+      .from(userMatches)
+      .innerJoin(matches, eq(matches.id, userMatches.matchId))
       .where(
         and(
-          eq(apiUsage.userId, userId),
-          gte(apiUsage.calledAt, sql`now() - interval '90 days'`),
+          eq(userMatches.userId, userId),
+          gte(matches.firstSeen, since72hSql),
+          ne(userMatches.status, "dismissed"),
+          eq(userMatches.isBaseline, false),
+          isNull(matches.closedAt),
         ),
       )
-      .groupBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`)
-      .orderBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`);
-    dailySpend = dailySpendRows.map((r) => ({
-      date: r.date,
-      spendUsd: parseFloat(r.total),
-    }));
-
-    const dismissByReasonRows = await db.execute(
-      sql`SELECT unnest(um.dismiss_reason) AS reason, count(*)::int AS count
-          FROM user_matches um
-          WHERE um.user_id = ${userId}
-            AND um.status = 'dismissed'
-            AND um.dismiss_reason IS NOT NULL
-          GROUP BY reason`,
-    );
-    for (const r of dismissByReasonRows.rows as { reason: string; count: number }[]) {
-      dismissByReason[r.reason] = r.count;
-    }
-    const noTagRow = await db.execute(
-      sql`SELECT count(*)::int AS count
-          FROM user_matches um
-          WHERE um.user_id = ${userId}
-            AND um.status = 'dismissed'
-            AND um.dismiss_reason IS NULL`,
-    );
-    noTagCount = (noTagRow.rows[0] as { count: number } | undefined)?.count ?? 0;
-
-    const topDismissedCompaniesRows = await db.execute(
-      sql`SELECT m.company_display_name AS company, count(*)::int AS count
-          FROM user_matches um
-          JOIN matches m ON m.id = um.match_id
-          WHERE um.user_id = ${userId}
-            AND um.status = 'dismissed'
-          GROUP BY m.company_display_name
-          ORDER BY count DESC
-          LIMIT 5`,
-    );
-    topDismissedCompanies = topDismissedCompaniesRows.rows as {
-      company: string;
-      count: number;
-    }[];
-
-    const topDismissedTitlesRows = await db.execute(
-      sql`SELECT m.title, count(*)::int AS count
-          FROM user_matches um
-          JOIN matches m ON m.id = um.match_id
-          WHERE um.user_id = ${userId}
-            AND um.status = 'dismissed'
-          GROUP BY m.title
-          ORDER BY count DESC
-          LIMIT 10`,
-    );
-    topDismissedTitles = topDismissedTitlesRows.rows as {
-      title: string;
-      count: number;
-    }[];
-
-    const recentDismissed = await db
+      .groupBy(userMatches.level),
+    // Fit band query — 24h slice, bucket by fit_score. Per-user via
+    // join. Drizzle's raw sql template lets us keep the CASE-based
+    // bucketing as a single statement.
+    db.execute(
+      sql`SELECT
+        CASE
+          WHEN um.fit_score IS NULL THEN 'unscored'
+          WHEN um.fit_score >= 8.0 THEN 'high'
+          WHEN um.fit_score >= 6.0 THEN 'good'
+          ELSE 'low'
+        END AS band,
+        count(*)::int AS count
+      FROM user_matches um
+      JOIN matches m ON m.id = um.match_id
+      WHERE um.user_id = ${userId}
+        AND m.first_seen >= now() - interval '24 hours'
+        AND um.status != 'dismissed'
+        AND um.is_baseline = false
+        AND m.closed_at IS NULL
+      GROUP BY band`,
+    ),
+    db
       .select({
-        // Mirrors db/matches.ts `joinedSelect` — returns the `Match`
-        // merged shape (global fields from matches.* + per-user state
-        // from user_matches.*) that CompactRow expects.
+        slug: matches.companySlug,
+        name: matches.companyDisplayName,
+        h24: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since24hSql})::int`,
+        h48: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since48hSql})::int`,
+        h72: sql<number>`count(*) FILTER (WHERE ${matches.firstSeen} >= ${since72hSql})::int`,
+      })
+      .from(userMatches)
+      .innerJoin(matches, eq(matches.id, userMatches.matchId))
+      .where(
+        and(
+          eq(userMatches.userId, userId),
+          gte(matches.firstSeen, since72hSql),
+          ne(userMatches.status, "dismissed"),
+          eq(userMatches.isBaseline, false),
+          isNull(matches.closedAt),
+        ),
+      )
+      .groupBy(matches.companySlug, matches.companyDisplayName),
+    // Top 10 companies by open roles.
+    db
+      .select({
+        slug: matches.companySlug,
+        name: matches.companyDisplayName,
+        level: userMatches.level,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(userMatches)
+      .innerJoin(matches, eq(matches.id, userMatches.matchId))
+      .where(
+        and(
+          eq(userMatches.userId, userId),
+          ne(userMatches.status, "dismissed"),
+          eq(userMatches.isBaseline, false),
+          isNull(matches.closedAt),
+        ),
+      )
+      .groupBy(matches.companySlug, matches.companyDisplayName, userMatches.level),
+    // Closed rows are global — when matches.closed_at is set, the job
+    // is gone for everyone. But we still want to scope the closed
+    // count to roles the viewer was watching (joined via user_matches).
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(userMatches)
+      .innerJoin(matches, eq(matches.id, userMatches.matchId))
+      .where(
+        and(
+          eq(userMatches.userId, userId),
+          ne(userMatches.status, "dismissed"),
+          isNotNull(matches.closedAt),
+        ),
+      ),
+    db
+      .select({
+        // Re-project to the shape Match expects so ClosedRoles' CompactRow
+        // can render. Per-user state pulled from user_matches.
         id: matches.id,
         ats: matches.ats,
         companySlug: matches.companySlug,
@@ -426,9 +195,264 @@ export default async function Analytics() {
       })
       .from(userMatches)
       .innerJoin(matches, eq(matches.id, userMatches.matchId))
-      .where(and(eq(userMatches.userId, userId), eq(userMatches.status, "dismissed")))
-      .orderBy(desc(userMatches.updatedAt))
-      .limit(25);
+      .where(
+        and(
+          eq(userMatches.userId, userId),
+          ne(userMatches.status, "dismissed"),
+          isNotNull(matches.closedAt),
+        ),
+      )
+      .orderBy(desc(matches.closedAt))
+      .limit(25),
+    db
+      .select({ ts: sql<string | null>`max(${targets.lastSuccessAt})` })
+      .from(targets),
+    // Failing-scan detection: a target is flagged if its
+    // last_success_at is meaningfully older than the most recent
+    // successful scan across all targets. Scoped to the viewer's
+    // user_targets so demo sees only their curated set.
+    db.execute(sql`
+      SELECT t.slug, t.display_name, t.ats, t.last_success_at
+      FROM targets t
+      JOIN user_targets ut ON ut.target_slug = t.slug AND ut.user_id = ${userId}
+      WHERE t.last_success_at IS NULL
+         OR t.last_success_at < ${scanCutoffSql}
+      ORDER BY t.last_success_at ASC NULLS FIRST
+    `),
+    // New jobs per day (scoped to the viewer's watchlist) — counts of
+    // matches.first_seen per UTC day for the last 90 days, grouped by
+    // level so the chart can stack BV/HIGH/MEDIUM/LOW. Excludes
+    // baseline imports (those are intentional bulk adds, not net-new
+    // discoveries). The chart pads missing days/levels client-side.
+    db.execute(sql`
+      SELECT
+        to_char(date_trunc('day', m.first_seen at time zone 'UTC'), 'YYYY-MM-DD') AS date,
+        um.level AS level,
+        count(*)::int AS count
+      FROM user_matches um
+      JOIN matches m ON m.id = um.match_id
+      WHERE um.user_id = ${userId}
+        AND um.is_baseline = false
+        AND m.first_seen >= now() - interval '90 days'
+      GROUP BY date_trunc('day', m.first_seen at time zone 'UTC'), um.level
+      ORDER BY date_trunc('day', m.first_seen at time zone 'UTC')
+    `),
+  ]);
+
+  // ─── Post-processing (pure CPU, no further round trips) ───────────
+  const newRolesByLevel: NewRolesByLevel = {
+    BV: { h24: 0, h48: 0, h72: 0 },
+    HIGH: { h24: 0, h48: 0, h72: 0 },
+    MEDIUM: { h24: 0, h48: 0, h72: 0 },
+    LOW: { h24: 0, h48: 0, h72: 0 },
+  };
+  for (const r of byLevelWindowRows) {
+    newRolesByLevel[r.level as Level] = { h24: r.h24, h48: r.h48, h72: r.h72 };
+  }
+
+  const newRolesByFit: NewRolesByFitBand = {
+    high: 0,
+    good: 0,
+    low: 0,
+    unscored: 0,
+  };
+  for (const r of byFitBandRows.rows as { band: string; count: number }[]) {
+    if (r.band === "high" || r.band === "good" || r.band === "low" || r.band === "unscored") {
+      newRolesByFit[r.band] = r.count;
+    }
+  }
+
+  const newRolesByCompany: NewRolesByCompany[] = byCompanyWindowRows.map((r) => ({
+    slug: r.slug,
+    name: r.name,
+    h24: r.h24,
+    h48: r.h48,
+    h72: r.h72,
+  }));
+
+  const companyMap = new Map<string, CompanyData>();
+  for (const r of perSlugLevel) {
+    let entry = companyMap.get(r.slug);
+    if (!entry) {
+      entry = {
+        slug: r.slug,
+        name: r.name,
+        byLevel: { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 },
+      };
+      companyMap.set(r.slug, entry);
+    }
+    entry.byLevel[r.level as Level] = r.count;
+  }
+  const companies = Array.from(companyMap.values());
+
+  const closedTotal = closedTotalRow[0]?.count ?? 0;
+  const closedWithUrls: ClosedRow[] = await Promise.all(
+    closedRows.map(async (m) => ({
+      m: m as ClosedRow["m"],
+      applyUrl: await jobUrl(m.ats, m.companySlug, m.jobId),
+    })),
+  );
+
+  const latestSuccessIso = latestSuccessRow[0]?.ts ?? null;
+
+  const failingTargets: FailingTarget[] = (
+    failingRows.rows as Array<{
+      slug: string;
+      display_name: string;
+      ats: string;
+      last_success_at: string | null;
+    }>
+  ).map((r) => ({
+    slug: r.slug,
+    displayName: r.display_name,
+    ats: r.ats as FailingTarget["ats"],
+    lastSuccessIso: r.last_success_at ? new Date(r.last_success_at).toISOString() : null,
+  }));
+
+  const dailyJobsMap = new Map<string, Record<Level, number>>();
+  for (const r of dailyNewJobsRows.rows as {
+    date: string;
+    level: string;
+    count: number;
+  }[]) {
+    let entry = dailyJobsMap.get(r.date);
+    if (!entry) {
+      entry = { BV: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+      dailyJobsMap.set(r.date, entry);
+    }
+    entry[r.level as Level] = r.count;
+  }
+  const dailyNewJobs: DailyNewJobsRow[] = Array.from(dailyJobsMap.entries()).map(
+    ([date, counts]) => ({ date, counts }),
+  );
+
+  // ─── Personal-data sections (skipped entirely in demo mode) ───────
+  // Dismissal patterns + API spend reveal the viewer's actual
+  // job-search activity. Skip the queries in demo to save round
+  // trips. (Demo user has nothing to reveal anyway.)
+  let dailySpend: DailySpendRow[] = [];
+  let dismissByReason: Record<string, number> = {};
+  let noTagCount = 0;
+  let topDismissedCompanies: { company: string; count: number }[] = [];
+  let topDismissedTitles: { title: string; count: number }[] = [];
+  let recentWithUrls: { m: Match; url: string }[] = [];
+
+  if (!isDemo) {
+    // Same parallel-batch treatment as the aggregates above — these
+    // six are independent of each other.
+    const [
+      dailySpendRows,
+      dismissByReasonRows,
+      noTagRow,
+      topDismissedCompaniesRows,
+      topDismissedTitlesRows,
+      recentDismissed,
+    ] = await Promise.all([
+      db
+        .select({
+          date: sql<string>`to_char(date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC'), 'YYYY-MM-DD')`,
+          total: sql<string>`coalesce(sum(${apiUsage.costUsd}), 0)::text`,
+        })
+        .from(apiUsage)
+        .where(
+          and(
+            eq(apiUsage.userId, userId),
+            gte(apiUsage.calledAt, sql`now() - interval '90 days'`),
+          ),
+        )
+        .groupBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`)
+        .orderBy(sql`date_trunc('day', ${apiUsage.calledAt} at time zone 'UTC')`),
+      db.execute(
+        sql`SELECT unnest(um.dismiss_reason) AS reason, count(*)::int AS count
+            FROM user_matches um
+            WHERE um.user_id = ${userId}
+              AND um.status = 'dismissed'
+              AND um.dismiss_reason IS NOT NULL
+            GROUP BY reason`,
+      ),
+      db.execute(
+        sql`SELECT count(*)::int AS count
+            FROM user_matches um
+            WHERE um.user_id = ${userId}
+              AND um.status = 'dismissed'
+              AND um.dismiss_reason IS NULL`,
+      ),
+      db.execute(
+        sql`SELECT m.company_display_name AS company, count(*)::int AS count
+            FROM user_matches um
+            JOIN matches m ON m.id = um.match_id
+            WHERE um.user_id = ${userId}
+              AND um.status = 'dismissed'
+            GROUP BY m.company_display_name
+            ORDER BY count DESC
+            LIMIT 5`,
+      ),
+      db.execute(
+        sql`SELECT m.title, count(*)::int AS count
+            FROM user_matches um
+            JOIN matches m ON m.id = um.match_id
+            WHERE um.user_id = ${userId}
+              AND um.status = 'dismissed'
+            GROUP BY m.title
+            ORDER BY count DESC
+            LIMIT 10`,
+      ),
+      db
+        .select({
+          // Mirrors db/matches.ts `joinedSelect` — returns the `Match`
+          // merged shape (global fields from matches.* + per-user state
+          // from user_matches.*) that CompactRow expects.
+          id: matches.id,
+          ats: matches.ats,
+          companySlug: matches.companySlug,
+          companyDisplayName: matches.companyDisplayName,
+          jobId: matches.jobId,
+          title: matches.title,
+          location: matches.location,
+          firstSeen: matches.firstSeen,
+          lastSeen: matches.lastSeen,
+          closedAt: matches.closedAt,
+          createdAt: matches.createdAt,
+          level: userMatches.level,
+          status: userMatches.status,
+          isBaseline: userMatches.isBaseline,
+          appliedAt: userMatches.appliedAt,
+          dismissedAt: userMatches.dismissedAt,
+          dismissReason: userMatches.dismissReason,
+          fitScore: userMatches.fitScore,
+          fitSummary: userMatches.fitSummary,
+          fitFlag: userMatches.fitFlag,
+          tier1Score: userMatches.tier1Score,
+          tier1Confidence: userMatches.tier1Confidence,
+          tier1IsPotentialBv: userMatches.tier1IsPotentialBv,
+          tier1QuickTake: userMatches.tier1QuickTake,
+          pendingBvVerification: userMatches.pendingBvVerification,
+          bvReasoning: userMatches.bvReasoning,
+          updatedAt: userMatches.updatedAt,
+        })
+        .from(userMatches)
+        .innerJoin(matches, eq(matches.id, userMatches.matchId))
+        .where(and(eq(userMatches.userId, userId), eq(userMatches.status, "dismissed")))
+        .orderBy(desc(userMatches.updatedAt))
+        .limit(25),
+    ]);
+
+    dailySpend = dailySpendRows.map((r) => ({
+      date: r.date,
+      spendUsd: parseFloat(r.total),
+    }));
+    for (const r of dismissByReasonRows.rows as { reason: string; count: number }[]) {
+      dismissByReason[r.reason] = r.count;
+    }
+    noTagCount = (noTagRow.rows[0] as { count: number } | undefined)?.count ?? 0;
+    topDismissedCompanies = topDismissedCompaniesRows.rows as {
+      company: string;
+      count: number;
+    }[];
+    topDismissedTitles = topDismissedTitlesRows.rows as {
+      title: string;
+      count: number;
+    }[];
     recentWithUrls = await Promise.all(
       recentDismissed.map(async (m) => ({
         m,

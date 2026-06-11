@@ -25,7 +25,9 @@ export const EMPTY_KEYWORDS: LoadedPersonalKeywords = {
   finservBonusPositivePatterns: [],
 };
 
-let cached: LoadedPersonalKeywords | null = null;
+// Promise cache (see db/targets.ts) — concurrent first calls share
+// one query; cleared on rejection.
+let cached: Promise<LoadedPersonalKeywords> | null = null;
 
 function compileRegexes(name: string, sources: string[]): RegExp[] {
   const out: RegExp[] = [];
@@ -65,9 +67,13 @@ async function loadFresh(): Promise<LoadedPersonalKeywords> {
 // Fetch the single personal_keywords row, with regexes pre-compiled.
 // Returns EMPTY_KEYWORDS if the table is empty — the scan and classifier
 // continue working in that state, just without personal enhancements.
-export async function getPersonalKeywords(): Promise<LoadedPersonalKeywords> {
-  if (cached) return cached;
-  cached = await loadFresh();
+export function getPersonalKeywords(): Promise<LoadedPersonalKeywords> {
+  if (!cached) {
+    cached = loadFresh().catch((err) => {
+      cached = null;
+      throw err;
+    });
+  }
   return cached;
 }
 
@@ -113,7 +119,7 @@ export async function replacePersonalKeywords(row: {
         updatedAt: sql`now()`,
       },
     });
-  cached = {
+  const next: LoadedPersonalKeywords = {
     bvPhrases: row.bvPhrases,
     healthcareSkips: row.healthcareSkips,
     hardCapLowPatterns: compileRegexes("hard_cap_low_patterns", row.hardCapLowPatterns),
@@ -122,5 +128,6 @@ export async function replacePersonalKeywords(row: {
       row.finservBonusPositivePatterns,
     ),
   };
-  return cached;
+  cached = Promise.resolve(next);
+  return next;
 }

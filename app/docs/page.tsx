@@ -11,7 +11,7 @@ import { DailySpendChart, type DailySpendRow } from "./daily-spend-chart";
 import TargetsTable, { type TargetRow } from "./targets-table";
 import { ScoringCapsEditor } from "./scoring-caps-editor";
 import { getScoringCaps } from "@/db/scoring-caps";
-import { checkSpend } from "@/lib/fit/spendCaps";
+import { checkSpends } from "@/lib/fit/spendCaps";
 import { longDate, shortDate } from "@/lib/format/dates";
 
 export const dynamic = "force-dynamic";
@@ -39,9 +39,7 @@ export default async function Docs() {
     targets,
     manualCompanies,
     scoringCaps,
-    triageSpend,
-    scoreSpend,
-    summarySpend,
+    spendStatuses,
   ] = await Promise.all([
     db
       .select({
@@ -56,10 +54,12 @@ export default async function Docs() {
       .where(eq(userTargets.userId, userId)),
     getManualCompanies(),
     getScoringCaps(userId),
-    checkSpend(userId, "triage"),
-    checkSpend(userId, "score"),
-    checkSpend(userId, "summary"),
+    // One bulk call: 2 round trips for all three purposes instead of
+    // the 6 the prior per-purpose checkSpend calls cost.
+    checkSpends(userId, ["triage", "score", "summary"] as const),
   ]);
+  const { triage: triageSpend, score: scoreSpend, summary: summarySpend } =
+    spendStatuses;
   // Inline sector helper using the fetched rows — avoids touching the
   // db/targets module-level helper which would do a separate (cached)
   // round trip.

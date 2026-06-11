@@ -3,16 +3,29 @@ import { getDb } from "./client";
 import { targets, type Target } from "./schema";
 import type { CompanyStage, Sector } from "@/lib/scan/types";
 
-// Module-memory cache of the targets list, mirroring db/profile.ts.
-// Targets change rarely (only when the user re-runs
-// `npm run ingest-config`); the cache resets on every cold start so a
-// re-deploy or function recycle picks up the latest.
-let cached: {
+// Module-memory cache of the targets list. Targets change rarely
+// (only when the user re-runs `npm run ingest-config`); the cache
+// resets on every cold start so a re-deploy or function recycle picks
+// up the latest. Caches the in-flight PROMISE so concurrent first
+// calls (e.g. per-row helpers under Promise.all on a cold function)
+// share one query instead of each firing their own.
+type TargetIndex = {
   rows: Target[];
   bySlug: Map<string, Target>;
   sectorBySlug: Map<string, Sector>;
   stageBySlug: Map<string, CompanyStage>;
-} | null = null;
+};
+let cached: Promise<TargetIndex> | null = null;
+
+function getIndex(): Promise<TargetIndex> {
+  if (!cached) {
+    cached = loadFresh().catch((err) => {
+      cached = null;
+      throw err;
+    });
+  }
+  return cached;
+}
 
 function buildIndex(rows: Target[]) {
   const bySlug = new Map<string, Target>();
@@ -41,23 +54,20 @@ async function loadFresh() {
 // Returns an array sorted insertion-order by DB (Postgres-undefined —
 // callers that need stable order should sort by displayName).
 export async function getTargets(): Promise<Target[]> {
-  if (!cached) cached = await loadFresh();
-  return cached.rows;
+  return (await getIndex()).rows;
 }
 
 // Slug → sector helper. Returns "tech" for unknown slugs to match the
 // classifier's default dispatch. Async on first call (DB round trip),
 // sub-ms on cache hits.
 export async function sectorForSlug(slug: string): Promise<Sector> {
-  if (!cached) cached = await loadFresh();
-  return cached.sectorBySlug.get(slug) ?? "tech";
+  return (await getIndex()).sectorBySlug.get(slug) ?? "tech";
 }
 
 // Slug → stage helper. Returns null for unknown slugs or slugs without
 // a stage. Used by the fit-scoring rubric's stage dimension.
 export async function stageForSlug(slug: string): Promise<CompanyStage | null> {
-  if (!cached) cached = await loadFresh();
-  return cached.stageBySlug.get(slug) ?? null;
+  return (await getIndex()).stageBySlug.get(slug) ?? null;
 }
 
 // Fail fast if two targets share a slug — schema makes slug the PK so
@@ -137,6 +147,6 @@ export async function replaceTargets(
   }
 
   const final = await db.select().from(targets);
-  cached = buildIndex(final);
+  cached = Promise.resolve(buildIndex(final));
   return final;
 }

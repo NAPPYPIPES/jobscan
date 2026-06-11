@@ -7,7 +7,13 @@ import { workdayTenants, type WorkdayTenantRow } from "./schema";
 // the slug.
 export type WorkdayConfig = { host: string; board: string };
 
-let cached: Record<string, WorkdayConfig> | null = null;
+// Cache the in-flight PROMISE, not the resolved value. Pages call
+// jobUrl() per match row inside Promise.all — with a value cache,
+// every Workday row on a cold function misses simultaneously and
+// each fires its own Neon query. Sharing the promise collapses that
+// stampede to one query. Cleared on rejection so a transient DB
+// error doesn't poison the cache.
+let cached: Promise<Record<string, WorkdayConfig>> | null = null;
 
 async function loadFresh(): Promise<Record<string, WorkdayConfig>> {
   const db = getDb();
@@ -22,9 +28,13 @@ async function loadFresh(): Promise<Record<string, WorkdayConfig>> {
 // Returns the slug → {host, board} map. Empty object if nothing
 // ingested — callers (the adapter + URL builder) check for that and
 // fall back appropriately.
-export async function getWorkdayBoards(): Promise<Record<string, WorkdayConfig>> {
-  if (cached) return cached;
-  cached = await loadFresh();
+export function getWorkdayBoards(): Promise<Record<string, WorkdayConfig>> {
+  if (!cached) {
+    cached = loadFresh().catch((err) => {
+      cached = null;
+      throw err;
+    });
+  }
   return cached;
 }
 
@@ -77,6 +87,6 @@ export async function replaceWorkdayTenants(
   const final = await db.select().from(workdayTenants);
   const map: Record<string, WorkdayConfig> = {};
   for (const r of final) map[r.slug] = { host: r.host, board: r.board };
-  cached = map;
+  cached = Promise.resolve(map);
   return final;
 }

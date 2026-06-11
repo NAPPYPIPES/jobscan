@@ -21,11 +21,24 @@ const VALID_SECTORS: ReadonlySet<string> = new Set([
   "other",
 ]);
 
-// Module-memory cache, same pattern as db/profile.ts and db/targets.ts.
-let cached: {
+// Module-memory cache, same pattern as db/targets.ts: caches the
+// in-flight PROMISE so concurrent first calls on a cold function
+// share one query. Cleared on rejection.
+type ManualIndex = {
   rows: ManualCompany[];
   validNames: Set<string>;
-} | null = null;
+};
+let cached: Promise<ManualIndex> | null = null;
+
+function getIndex(): Promise<ManualIndex> {
+  if (!cached) {
+    cached = loadFresh().catch((err) => {
+      cached = null;
+      throw err;
+    });
+  }
+  return cached;
+}
 
 function toDomain(rows: ManualCompanyRow[]): ManualCompany[] {
   return rows.map((r) => ({
@@ -52,18 +65,14 @@ async function loadFresh() {
 // ingested — the /manual page handles that gracefully (shows an empty
 // grid with the "checked today" counter at zero).
 export async function getManualCompanies(): Promise<ManualCompany[]> {
-  if (cached) return cached.rows;
-  cached = await loadFresh();
-  return cached.rows;
+  return (await getIndex()).rows;
 }
 
 // Allowlist used by the POST /api/manual/check route to refuse writes
 // for company names that aren't in the configured list. Caches the
 // derived Set so repeated calls in a warm function don't rebuild it.
 export async function getValidManualCompanies(): Promise<Set<string>> {
-  if (cached) return cached.validNames;
-  cached = await loadFresh();
-  return cached.validNames;
+  return (await getIndex()).validNames;
 }
 
 // Replace the entire manual_companies table.
@@ -117,9 +126,9 @@ export async function replaceManualCompanies(
 
   const final = await db.select().from(manualCompanies);
   const domain = toDomain(final);
-  cached = {
+  cached = Promise.resolve({
     rows: domain,
     validNames: new Set(domain.map((c) => c.name)),
-  };
+  });
   return domain;
 }
