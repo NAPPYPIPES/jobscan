@@ -9,6 +9,7 @@
     "scan": "tsx scan.ts",
     "ingest-resume": "tsx scripts/ingest-resume.ts",
     "ingest-config": "tsx scripts/ingest-config.ts",
+    "reseed-user-targets": "tsx scripts/reseed-user-targets.ts",
     "validate-ats": "tsx scripts/validate-ats.ts",
     "populate-companies": "tsx scripts/populate-company-descriptions.ts",
     "migrate-rescore": "tsx scripts/migrate-rescore.ts",

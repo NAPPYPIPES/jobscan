@@ -42,6 +42,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      // Always show the Google account chooser instead of silently
+      // reusing whatever account the browser is already signed into —
+      // otherwise a logged-in Google session picks the wrong account
+      // with no way to switch.
+      authorization: { params: { prompt: "select_account" } },
       // Link Google sign-ins to existing users by email. Safe for Google
       // because Google verifies emails; the maintainer row is seeded
       // with email = MAINTAINER_EMAIL and gets linked on first login.
