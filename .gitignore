@@ -51,3 +51,6 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# temporary Vercel import file — contains secrets
+.env.vercel

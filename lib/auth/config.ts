@@ -28,7 +28,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { users, accounts, sessions, verificationTokens, userExtras } from "@/db/schema";
 import { authConfigEdge } from "@/lib/auth/config.edge";
-import { DEMO_USER_ID, DEMO_EMAIL } from "@/lib/auth/maintainer";
+import { MAINTAINER_EMAIL } from "@/lib/auth/maintainer";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfigEdge,
@@ -38,6 +38,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     sessionsTable: sessions,
     verificationTokensTable: verificationTokens,
   }),
+  callbacks: {
+    // Preserve the jwt/session callbacks defined on the edge config
+    // (the spread above brings them in, but declaring `callbacks` here
+    // would otherwise replace the whole object — so re-spread them).
+    ...authConfigEdge.callbacks,
+    // Single-user lockdown: only the maintainer may sign in. This is a
+    // public deployment, and without this guard anyone with a Google
+    // account could create their own account (and spend Anthropic
+    // credits). The Credentials + demo providers set their own identity
+    // internally, so we only gate the Google (OAuth) provider by email.
+    async signIn({ account, profile, user }) {
+      if (account?.provider !== "google") return true;
+      const email = (profile?.email ?? user?.email ?? "").toLowerCase();
+      return email === MAINTAINER_EMAIL.toLowerCase();
+    },
+  },
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
@@ -97,11 +113,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       name: "Demo",
       credentials: {},
       async authorize() {
-        return {
-          id: DEMO_USER_ID,
-          email: DEMO_EMAIL,
-          name: "Demo",
-        };
+        // Single-user lockdown: demo access is disabled on this personal
+        // deployment. Returning null rejects the sign-in even if someone
+        // POSTs to /api/auth/callback/demo directly (the UI button is
+        // also removed from app/login/page.tsx).
+        return null;
       },
     }),
   ],
