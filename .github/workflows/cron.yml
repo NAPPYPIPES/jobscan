@@ -10,23 +10,22 @@ name: 3-hourly scan + score + daily digest
 
 on:
   schedule:
-    # Every 3 hours at :05 — gives Vercel a few seconds headroom for
-    # the cron tick to align cleanly with the hour boundary. 8 fires
-    # per day (00:05, 03:05, ... 21:05 UTC). Was hourly originally;
-    # moved to 3-hourly after observing GH Actions free-tier
-    # scheduled-workflow drops (multi-hour gaps several times daily).
-    # The score-loop step (4 passes per fire) was sized accordingly:
-    # a single fire now drains ~3 hours of arrivals plus catches up
-    # any dropped run.
-    - cron: "5 */3 * * *"
-    # Daily digest at 01:00 UTC = 8pm EST / 9pm EDT (always within
-    # the user's 8-9pm Eastern preference regardless of DST).
-    - cron: "0 1 * * *"
+    # Every 3 hours at :23 — deliberately an odd, off-the-hour minute.
+    # GitHub's shared scheduler is most congested (and most likely to
+    # drop runs) on the hour and at :00/:05; odd minutes fire more
+    # reliably on the free tier. 8 fires/day (00:23, 03:23, ... 21:23).
+    # Was ":05"; moved after scheduled runs failed to fire at all
+    # (2026-07-02). The score-loop step (4 passes per fire) drains ~3h
+    # of arrivals plus catches up any dropped run.
+    - cron: "23 */3 * * *"
+    # Daily digest at 01:37 UTC = 8:37pm EST / 9:37pm EDT (within the
+    # user's 8-9pm Eastern window; odd minute for scheduler reliability).
+    - cron: "37 1 * * *"
   workflow_dispatch:
 
 jobs:
   scan-and-score:
-    if: github.event.schedule == '5 */3 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '23 */3 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Scan target companies
@@ -61,7 +60,7 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
 
   daily-digest:
-    if: github.event.schedule == '0 1 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '37 1 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Send daily digest email
