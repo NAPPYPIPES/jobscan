@@ -27,11 +27,17 @@ jobs:
   scan-and-score:
     if: github.event.schedule == '23 */3 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # Hard ceiling so a slow-upstream day (Vercel/Anthropic/Neon latency
+    # spike) can't drag a single fire to the ~15-min mark and get the job
+    # cancelled. Scan + 4× score normally finishes in <5 min; 12 leaves
+    # headroom for the retry backoff below. Added 2026-08-06 after a
+    # transient upstream blip turned into two 15-min cancelled runs.
+    timeout-minutes: 12
     steps:
       - name: Scan target companies
         run: |
           curl --fail-with-body --silent --show-error \
-            --retry 3 --retry-delay 15 --retry-all-errors \
+            --max-time 90 --retry 3 --retry-delay 15 --retry-all-errors \
             -H "Authorization: Bearer $CRON_SECRET" \
             "$SITE_URL/api/cron/scan"
         env:
@@ -50,7 +56,7 @@ jobs:
           for i in 1 2 3 4; do
             echo "--- score pass $i ---"
             curl --fail-with-body --silent --show-error \
-              --retry 3 --retry-delay 15 --retry-all-errors \
+              --max-time 90 --retry 3 --retry-delay 15 --retry-all-errors \
               -H "Authorization: Bearer $CRON_SECRET" \
               "$SITE_URL/api/cron/score"
             echo
@@ -62,11 +68,12 @@ jobs:
   daily-digest:
     if: github.event.schedule == '37 1 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Send daily digest email
         run: |
           curl --fail-with-body --silent --show-error \
-            --retry 3 --retry-delay 15 --retry-all-errors \
+            --max-time 90 --retry 3 --retry-delay 15 --retry-all-errors \
             -H "Authorization: Bearer $CRON_SECRET" \
             "$SITE_URL/api/cron/digest"
         env:
